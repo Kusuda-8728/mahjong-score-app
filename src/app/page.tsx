@@ -14,6 +14,15 @@ const UMA_PRESETS: Record<string, [number, number, number, number]> = {
   "10-30": [30, 10, -10, -30],
   "5-10": [10, 5, -5, -10],
 };
+type UmaTypeOption = "10-20" | "10-30" | "5-10" | "custom";
+const UMA_OPTIONS: UmaTypeOption[] = ["10-20", "10-30", "5-10", "custom"];
+const isUmaType = (value: string): value is UmaTypeOption =>
+  (UMA_OPTIONS as readonly string[]).includes(value);
+
+type ChipTypeOption = "none" | "500" | "1000" | "custom";
+const CHIP_TYPE_OPTIONS: ChipTypeOption[] = ["none", "500", "1000", "custom"];
+const isChipType = (value: string): value is ChipTypeOption =>
+  (CHIP_TYPE_OPTIONS as readonly string[]).includes(value);
 
 type PlayerKey = "A" | "B" | "C" | "D";
 
@@ -804,14 +813,38 @@ export default function Home() {
         setRows(normalizedRows);
       }
       if (s.playerNames) setPlayerNames(s.playerNames);
-      if (s.umaType) setUmaType(s.umaType);
-      if (s.customUma) setCustomUma(s.customUma);
-      if (s.tobiBonus) setTobiBonus(String(s.tobiBonus));
-      if (s.oka) setOka(String(s.oka));
-      if (s.chipValueType) setChipValueType(s.chipValueType);
-      if (s.chipCustomValue) setChipCustomValue(String(s.chipCustomValue));
+      if (s.umaType && isUmaType(s.umaType)) {
+        setUmaType(s.umaType);
+      }
+      if (s.customUma && s.customUma.length === 4) {
+        setCustomUma(
+          s.customUma.map((v) => String(v ?? "")) as [string, string, string, string]
+        );
+      }
+      if (s.tobiBonus !== undefined) setTobiBonus(String(s.tobiBonus));
+      if (s.oka !== undefined) setOka(String(s.oka));
+      if (s.chipValueType && isChipType(s.chipValueType)) {
+        setChipValueType(s.chipValueType);
+      }
+      if (s.chipCustomValue !== undefined)
+        setChipCustomValue(String(s.chipCustomValue));
       if (s.gameDate) setGameDate(s.gameDate);
-      if (s.chipTotals) setChipTotals(s.chipTotals);
+      if (s.chipTotals) {
+        const normalizeChipValue = (val: number | string | "" | "-"): number | "" | "-" => {
+          if (val === "" || val === "-") return val;
+          if (typeof val === "number" && Number.isFinite(val)) return val;
+          const trimmed = String(val).trim();
+          if (trimmed === "" || trimmed === "-") return trimmed as "" | "-";
+          const parsed = Number(trimmed);
+          return Number.isFinite(parsed) ? parsed : "" ;
+        };
+        setChipTotals({
+          A: normalizeChipValue(s.chipTotals.A ?? ""),
+          B: normalizeChipValue(s.chipTotals.B ?? ""),
+          C: normalizeChipValue(s.chipTotals.C ?? ""),
+          D: normalizeChipValue(s.chipTotals.D ?? ""),
+        });
+      }
     }
     setShowHistoryModal(false);
   };
