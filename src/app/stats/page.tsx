@@ -167,7 +167,7 @@ export default function StatsPage() {
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
         <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
           <h1 className="text-lg font-semibold text-white mb-2">
-            通算成績ダッシュボード
+            通算成績
           </h1>
           {loading ? (
             <p className="text-xs text-zinc-400">読み込み中...</p>
@@ -188,7 +188,7 @@ export default function StatsPage() {
                       >
                         <div className="flex items-center justify-between text-sm font-medium text-white">
                           <span>{stat.name}</span>
-                          <span>{stat.games}局</span>
+                          <span>対戦数 {stat.games}</span>
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
                           <span className="text-zinc-400">合計素点</span>
@@ -260,8 +260,8 @@ export default function StatsPage() {
               <div>
                 <h3 className="text-sm font-medium text-white">対戦結果</h3>
                 <div className="mt-2 grid grid-cols-2 gap-y-1">
-                  <span className="text-zinc-400">対局数</span>
-                  <span>{headToHeadStats.games}局</span>
+                  <span className="text-zinc-400">対戦数</span>
+                  <span>{headToHeadStats.games}</span>
                   <span className="text-zinc-400">勝ち</span>
                   <span>{headToHeadStats.wins}</span>
                   <span className="text-zinc-400">引き分け</span>
