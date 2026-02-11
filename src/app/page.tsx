@@ -908,13 +908,15 @@ export default function Home() {
           <table className="min-w-full border-collapse text-xs">
             <thead>
               <tr>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">局数</th>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1 w-20">✅ / 飛賞</th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">
+                  <span className="sr-only">局数</span>
+                </th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1 w-16">飛賞</th>
                 {players.map((p, idx) => (
                   <th key={p} className={`border border-zinc-600 bg-zinc-900 px-1 py-1 text-center font-bold ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
                     <div className="flex flex-col items-center gap-0.5">
                       <span>{p}</span>
-                      <span className="max-w-[64px] truncate text-[10px] text-zinc-300">
+                      <span className="max-w-[80px] truncate text-[11px] text-zinc-300">
                         {playerNames[p] || p}
                       </span>
                     </div>
@@ -934,8 +936,8 @@ export default function Home() {
                 return (
                   <Fragment key={i}>
                     <tr>
-                      <td className="border border-zinc-600 px-1 py-0.5 align-top" rowSpan={2}>{i + 1}</td>
-                      <td className="border border-zinc-600 px-1 py-0.5 align-top w-20" rowSpan={2}>
+                      <td className="border border-zinc-600 px-2 py-1 align-top" rowSpan={2}>{i + 1}</td>
+                      <td className="border border-zinc-600 px-2 py-1 align-top w-16" rowSpan={2}>
                         <div className={`text-xs ${tobiMissing ? "font-semibold text-red-400" : ""}`}>
                           {tobiMissing ? "✖" : checkIcon}
                         </div>
@@ -968,19 +970,19 @@ export default function Home() {
                       {players.map((p, idx) => {
                         const shouldShowScore = check === "OK" && !tobiMissing;
                         return (
-                          <td key={p} className={`border border-zinc-600 px-1 py-0.5 font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
+                          <td key={p} className={`border border-zinc-600 px-2 py-1 font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
                             <div className="flex items-center gap-2">
-                              <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
+                              <span className={`w-5 shrink-0 text-left text-sm ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
                                 {shouldShowScore ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
                               </span>
                               <span className="flex-1 text-center">
                                 {shouldShowScore ? (() => {
                                   const sc = rows[i].scores[p];
-                                  if (sc === 0) return <span className="text-xs text-zinc-500">-</span>;
+                                  if (sc === 0) return <span className="text-sm text-zinc-500">-</span>;
                                   const positive = sc > 0;
                                   const text = positive ? "text-blue-300" : "text-red-400";
-                                  return <span className={`${text} text-xs`}>{positive ? `+${sc}` : sc}</span>;
-                                })() : <span className="text-xs text-zinc-500">-</span>}
+                                  return <span className={`${text} text-sm`}>{positive ? `+${sc}` : sc}</span>;
+                                })() : <span className="text-sm text-zinc-500">-</span>}
                               </span>
                             </div>
                           </td>
@@ -1093,7 +1095,7 @@ export default function Home() {
                   <div key={s.name} className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-white">{s.name}</div>
-                      <div className="text-xs text-zinc-400">対局数: {s.games}</div>
+                    <div className="text-xs text-zinc-400">対戦数: {s.games}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                       <div>合計スコア: <span className="font-medium tabular-nums">{Math.round(s.totalScore*10)/10}</span></div>
@@ -1229,10 +1231,10 @@ export default function Home() {
           </div>
         )}
 
-        {/* 対局データ分析 */}
+        {/* 対戦データ分析 */}
         <section className="mt-8 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
           <h2 className="mb-4 text-base font-medium text-white">
-            対局データ分析
+            対戦データ分析
           </h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {playerStats.map((stat) => {
@@ -1250,11 +1252,9 @@ export default function Home() {
                 >
                   <h3 className="mb-3 text-sm font-medium text-white">
                     {playerNames[stat.player] || stat.player}
-                    {stat.games !== undefined && stat.games > 0 && (
-                      <span className="ml-2 text-xs font-normal text-zinc-400">
-                        （{stat.games}局）
-                      </span>
-                    )}
+                    <span className="ml-2 text-xs font-normal text-zinc-400">
+                      対戦数：{stat.games}
+                    </span>
                   </h3>
                   <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                     <div>
