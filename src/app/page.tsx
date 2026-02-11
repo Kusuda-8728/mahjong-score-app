@@ -923,6 +923,14 @@ export default function Home() {
                       <td className="border border-zinc-600 px-1 py-0.5 align-top" rowSpan={2}>{i + 1}</td>
                       <td className="border border-zinc-600 px-1 py-0.5 align-top" rowSpan={2}>
                         <div className="text-xs">{checkIcon}</div>
+                        {tobiBonusNum > 0 && (() => {
+                          const ptsArr = ["A","B","C","D"].map((k) => row.points[k as PlayerKey]);
+                          const hasTobi = ptsArr.every((v) => typeof v === "number") && ptsArr.some((v: unknown) => typeof v === "number" && v < 0);
+                          if (hasTobi && !row.tobiPlayer) {
+                            return <div className="mt-1 text-red-400 text-xs">✖</div>;
+                          }
+                          return null;
+                        })()}
                         <div className="mt-1">
                           <select
                             value={row.tobiPlayer}
@@ -950,17 +958,19 @@ export default function Home() {
                     </tr>
                     <tr>
                       {players.map((p, idx) => (
-                        <td key={p} className={`border border-zinc-600 px-1 py-0.5 text-center font-medium tabular-nums ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
-                          <div className="flex items-center justify-center gap-1">
-                            <span className={`w-4 text-center text-xs ${rows[i].ranks[p] === 1 ? 'text-amber-300 font-semibold' : 'text-zinc-100'}`}>{rows[i].ranks[p] > 0 ? rows[i].ranks[p] : '-'}</span>
-                            <span>
-                              {(() => {
+                        <td key={p} className={`border border-zinc-600 px-1 py-0.5 font-medium tabular-nums ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
+                          <div className="flex items-center gap-2">
+                            <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? 'text-amber-300 font-semibold' : 'text-zinc-100'}`}>
+                              {check === "OK" ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
+                            </span>
+                            <span className="flex-1 text-center">
+                              {check === "OK" ? (() => {
                                 const sc = rows[i].scores[p];
-                                if (sc === 0) return '-';
+                                if (sc === 0) return <span className="text-xs text-zinc-500">-</span>;
                                 const positive = sc > 0;
-                                const text = positive ? 'text-blue-300' : 'text-red-400';
+                                const text = positive ? "text-blue-300" : "text-red-400";
                                 return <span className={`${text} text-xs`}>{positive ? `+${sc}` : sc}</span>;
-                              })()}
+                              })() : <span className="text-xs text-zinc-500">-</span>}
                             </span>
                           </div>
                         </td>
@@ -987,7 +997,13 @@ export default function Home() {
         </div>
 
         {/* 履歴 / 操作ボタン */} 
-        <div className="mt-4 flex gap-3">
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            onClick={addRow}
+            className="rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-700"
+          >
+            局を追加
+          </button>
           <button
             onClick={() => saveCurrentToHistory()}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
@@ -1000,18 +1016,6 @@ export default function Home() {
           >
             履歴を見る
           </button>
-            <button
-              onClick={exportHistoryBackup}
-              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-            >
-              バックアップ表示
-            </button>
-            <button
-              onClick={() => { setBackupText(""); setShowBackupModal(true); }}
-              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-            >
-              インポート
-            </button>
           <button
             onClick={computeAggregateStats}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
@@ -1023,38 +1027,6 @@ export default function Home() {
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
           >
             新規作成
-          </button>
-          <button
-            onClick={() => {
-              // copy current final result text to clipboard
-              const lastCompletedIndex = rows.map((r) =>
-                players.every((p) => typeof r.points[p] === "number")
-              ).lastIndexOf(true);
-              const totals = chipValuePerPoint > 0 ? totalWithChips : totalScores;
-              const dateStr = gameDate ? `${gameDate.slice(0,4)}/${gameDate.slice(5,7)}/${gameDate.slice(8,10)}` : '';
-              const lines: string[] = [];
-              lines.push(`【対局結果】${dateStr}`);
-              // sort players by totals desc
-              const order = [...players].sort((a,b)=> totals[b]-totals[a]);
-              order.forEach((p, idx) => {
-                const place = idx+1;
-                const name = playerNames[p] || p;
-                const val = totals[p] > 0 ? `+${totals[p]}` : `${totals[p]}`;
-                // detect tobied in lastCompletedIndex
-                let tob = '';
-                if (lastCompletedIndex >= 0) {
-                  const r = rows[lastCompletedIndex];
-                  const ranks = r.ranks;
-                  if (ranks && ranks[p] === 4) tob = ' (飛)';
-                }
-                lines.push(`${place}位: ${name} ${val}${tob}`);
-              });
-              const text = lines.join('\n');
-              navigator.clipboard?.writeText(text).then(()=> alert('結果をコピーしました'));
-            }}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          >
-            結果をコピー
           </button>
         </div>
 
@@ -1188,13 +1160,6 @@ export default function Home() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-start gap-4">
-          <button
-            onClick={addRow}
-            className="rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-700"
-          >
-            局を追加
-          </button>
-
           {/* チップ精算 */}
           {chipValuePerPoint > 0 && (
             <section className="rounded-lg border border-zinc-600 bg-zinc-900/80 p-4">
@@ -1349,6 +1314,50 @@ export default function Home() {
             })}
           </div>
         </section>
+
+        {/* バックアップ・インポート・結果コピー（アプリ最下部） */}
+        <div className="mt-8 flex flex-wrap gap-3 pb-8">
+          <button
+            onClick={exportHistoryBackup}
+            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+          >
+            バックアップ表示
+          </button>
+          <button
+            onClick={() => { setBackupText(""); setShowBackupModal(true); }}
+            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+          >
+            インポート
+          </button>
+          <button
+            onClick={() => {
+              const lastCompletedIndex = rows.map((r) =>
+                players.every((p) => typeof r.points[p] === "number")
+              ).lastIndexOf(true);
+              const totals = chipValuePerPoint > 0 ? totalWithChips : totalScores;
+              const dateStr = gameDate ? `${gameDate.slice(0,4)}/${gameDate.slice(5,7)}/${gameDate.slice(8,10)}` : '';
+              const lines: string[] = [];
+              lines.push(`【対局結果】${dateStr}`);
+              const order = [...players].sort((a,b)=> totals[b]-totals[a]);
+              order.forEach((p, idx) => {
+                const place = idx+1;
+                const name = playerNames[p] || p;
+                const val = totals[p] > 0 ? `+${totals[p]}` : `${totals[p]}`;
+                let tob = '';
+                if (lastCompletedIndex >= 0) {
+                  const r = rows[lastCompletedIndex];
+                  if (r.ranks && r.ranks[p] === 4) tob = ' (飛)';
+                }
+                lines.push(`${place}位: ${name} ${val}${tob}`);
+              });
+              const text = lines.join('\n');
+              navigator.clipboard?.writeText(text).then(()=> alert('結果をコピーしました'));
+            }}
+            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+          >
+            結果をコピー
+          </button>
+        </div>
       </main>
     </div>
   );
