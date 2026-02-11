@@ -909,7 +909,7 @@ export default function Home() {
             <thead>
               <tr>
                 <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">局数</th>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">✅ / 飛賞</th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1 w-20">✅ / 飛賞</th>
                 {players.map((p, idx) => (
                   <th key={p} className={`border border-zinc-600 bg-zinc-900 px-1 py-1 text-center font-bold ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
                     <div className="flex flex-col items-center gap-0.5">
@@ -925,21 +925,20 @@ export default function Home() {
             <tbody>
               {rows.map((row, i) => {
                 const check = checkTotal(row.points);
-                const checkIcon = check === 'OK' ? '✅' : check === 'NG' ? '❌' : '—';
+                const checkIcon = check === "OK" ? "✅" : check === "NG" ? "❌" : "—";
+                const ptsArr = ["A", "B", "C", "D"].map((k) => row.points[k as PlayerKey]);
+                const hasTobi =
+                  ptsArr.every((v) => typeof v === "number") &&
+                  ptsArr.some((v: unknown) => typeof v === "number" && v < 0);
+                const tobiMissing = tobiBonusNum > 0 && hasTobi && !row.tobiPlayer;
                 return (
                   <Fragment key={i}>
                     <tr>
                       <td className="border border-zinc-600 px-1 py-0.5 align-top" rowSpan={2}>{i + 1}</td>
-                      <td className="border border-zinc-600 px-1 py-0.5 align-top" rowSpan={2}>
-                        <div className="text-xs">{checkIcon}</div>
-                        {tobiBonusNum > 0 && (() => {
-                          const ptsArr = ["A","B","C","D"].map((k) => row.points[k as PlayerKey]);
-                          const hasTobi = ptsArr.every((v) => typeof v === "number") && ptsArr.some((v: unknown) => typeof v === "number" && v < 0);
-                          if (hasTobi && !row.tobiPlayer) {
-                            return <div className="mt-1 text-red-400 text-xs">✖</div>;
-                          }
-                          return null;
-                        })()}
+                      <td className="border border-zinc-600 px-1 py-0.5 align-top w-20" rowSpan={2}>
+                        <div className={`text-xs ${tobiMissing ? "font-semibold text-red-400" : ""}`}>
+                          {tobiMissing ? "✖" : checkIcon}
+                        </div>
                         <div className="mt-1">
                           <select
                             value={row.tobiPlayer}
@@ -966,24 +965,27 @@ export default function Home() {
                       ))}
                     </tr>
                     <tr>
-                      {players.map((p, idx) => (
-                        <td key={p} className={`border border-zinc-600 px-1 py-0.5 font-medium tabular-nums ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
-                          <div className="flex items-center gap-2">
-                            <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? 'text-amber-300 font-semibold' : 'text-zinc-100'}`}>
-                              {check === "OK" ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
-                            </span>
-                            <span className="flex-1 text-center">
-                              {check === "OK" ? (() => {
-                                const sc = rows[i].scores[p];
-                                if (sc === 0) return <span className="text-xs text-zinc-500">-</span>;
-                                const positive = sc > 0;
-                                const text = positive ? "text-blue-300" : "text-red-400";
-                                return <span className={`${text} text-xs`}>{positive ? `+${sc}` : sc}</span>;
-                              })() : <span className="text-xs text-zinc-500">-</span>}
-                            </span>
-                          </div>
-                        </td>
-                      ))}
+                      {players.map((p, idx) => {
+                        const shouldShowScore = check === "OK" && !tobiMissing;
+                        return (
+                          <td key={p} className={`border border-zinc-600 px-1 py-0.5 font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
+                            <div className="flex items-center gap-2">
+                              <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
+                                {shouldShowScore ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
+                              </span>
+                              <span className="flex-1 text-center">
+                                {shouldShowScore ? (() => {
+                                  const sc = rows[i].scores[p];
+                                  if (sc === 0) return <span className="text-xs text-zinc-500">-</span>;
+                                  const positive = sc > 0;
+                                  const text = positive ? "text-blue-300" : "text-red-400";
+                                  return <span className={`${text} text-xs`}>{positive ? `+${sc}` : sc}</span>;
+                                })() : <span className="text-xs text-zinc-500">-</span>}
+                              </span>
+                            </div>
+                          </td>
+                        );
+                      })}
                     </tr>
                   </Fragment>
                 );
