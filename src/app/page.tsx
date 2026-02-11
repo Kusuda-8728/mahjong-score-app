@@ -787,8 +787,12 @@ export default function Home() {
     }
   };
 
-  const loadHistoryEntry = (id: number) => {
-    const entry = history.find((h) => h.id === String(id));
+  const loadHistoryEntry = (id: string | number) => {
+    const key = typeof id === "number" ? String(id) : id;
+    const entry =
+      history.find((h) => h.id === key) ??
+      history.find((h) => String(h.id) === key) ??
+      history.find((h) => Number(h.id) === Number(key));
     if (!entry) return;
     const s = entry.snapshot;
     if (s) {
@@ -1438,7 +1442,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-              <button onClick={() => loadHistoryEntry(Number(h.id))} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
+              <button onClick={() => loadHistoryEntry(h.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
                       <button onClick={async () => {
                         if (!confirm('この履歴を削除しますか？')) return;
                         try {
