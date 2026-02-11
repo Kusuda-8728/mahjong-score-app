@@ -297,10 +297,11 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("matches")
-        .select<MatchRow>("*")
+        .select("*")
         .order("game_date", { ascending: false });
       if (error) throw error;
-      const entries: HistoryEntry[] = (data ?? []).map((m) => {
+      const matches = (data ?? []) as MatchRow[];
+      const entries: HistoryEntry[] = matches.map((m) => {
         const players = {
           A: (m.player_a ?? "A") || "A",
           B: (m.player_b ?? "B") || "B",
