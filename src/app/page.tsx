@@ -97,10 +97,10 @@ interface AggregatePlayerStats {
   gamesWithTobiRule: number;
   chipSum: number;
   chipGames: number;
-  avgRank?: number;
-  rankPct?: number[];
-  tobiRate?: number;
-  avgChip?: number | null;
+  avgRank: number;
+  rankPct: number[];
+  tobiRate: number;
+  avgChip: number | null;
 }
 
 function calculateRankAndScore(
@@ -683,6 +683,10 @@ export default function Home() {
               gamesWithTobiRule: 0,
               chipSum: 0,
               chipGames: 0,
+              avgRank: 0,
+              rankPct: [0, 0, 0, 0],
+              tobiRate: 0,
+              avgChip: null,
             };
           }
           const entryStats = map[normalized];
@@ -1027,7 +1031,17 @@ export default function Home() {
       else stats.draws += 1;
     });
 
-    if (stats.matches === 0) return { matches: 0 };
+    if (stats.matches === 0) {
+      return {
+        ...stats,
+        averageRankSelf: 0,
+        averageRankOpponent: 0,
+        averageScoreSelf: 0,
+        averageScoreOpponent: 0,
+        winRate: 0,
+        scoreDiff: 0,
+      };
+    }
 
     return {
       ...stats,
