@@ -51,6 +51,8 @@ interface SnapshotData {
   chipCustomValue?: number | string;
   gameDate?: string;
   chipTotals?: Record<PlayerKey, number | string | "" | "-">;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
 }
 
 interface MatchRow {
@@ -101,6 +103,12 @@ interface AggregatePlayerStats {
   rankPct: number[];
   tobiRate: number;
   avgChip: number | null;
+}
+
+interface UserProfile {
+  user_id: string;
+  display_name: string;
+  created_at?: string;
 }
 
 function calculateRankAndScore(
@@ -220,6 +228,10 @@ export default function Home() {
   });
   const [selectedSelfPlayer, setSelectedSelfPlayer] = useState("");
   const [selectedOpponentPlayer, setSelectedOpponentPlayer] = useState("");
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileInputName, setProfileInputName] = useState("");
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   const [gameDate, setGameDate] = useState<string>(() => {
     const d = new Date();
@@ -284,6 +296,60 @@ export default function Home() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- derived from state
   }, [umaType, customUma.join(","), tobiBonus, oka]);
+
+  const fetchUserProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("user_id, display_name, created_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        setUserProfile(data);
+        setProfileInputName(data.display_name);
+      } else {
+        setUserProfile(null);
+        setProfileInputName("");
+      }
+    } catch (e) {
+      console.error("fetch user profile failed", e);
+      setProfileMessage("ユーザー名の取得に失敗しました。");
+    }
+  };
+
+  const upsertUserProfile = async (name: string) => {
+    if (!currentUser) {
+      setProfileMessage("ログイン情報を確認できません。再度ログインしてください。");
+      return;
+    }
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setProfileMessage("ユーザー名を入力してください。");
+      return;
+    }
+    try {
+      setProfileSaving(true);
+      setProfileMessage(null);
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .upsert(
+          { user_id: currentUser.id, display_name: trimmed },
+          { onConflict: "user_id" }
+        )
+        .select("user_id, display_name, created_at")
+        .single();
+      if (error) throw error;
+      setUserProfile(data);
+      setProfileInputName(data.display_name);
+      setProfileMessage("ユーザー名を保存しました。");
+    } catch (e) {
+      console.error("upsert user profile failed", e);
+      setProfileMessage("ユーザー名の保存に失敗しました。");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const fetchPlayers = async () => {
     try {
@@ -359,6 +425,8 @@ export default function Home() {
                 C: m.chip_c ?? "",
                 D: m.chip_d ?? "",
               } as Record<PlayerKey, number | string | "" | "-">),
+            ownerUserId: snap.ownerUserId ?? undefined,
+            ownerDisplayName: snap.ownerDisplayName ?? undefined,
           },
         };
       });
@@ -399,7 +467,11 @@ export default function Home() {
       } catch (e) {
         console.error("load saved failed", e);
       }
-      await Promise.all([fetchPlayers(), fetchHistory()]);
+      await Promise.all([
+        fetchPlayers(),
+        fetchHistory(),
+        fetchUserProfile(session.user.id),
+      ]);
     };
     init();
   }, [router]);
@@ -448,10 +520,24 @@ export default function Home() {
     }
   };
 
-  const playerOptions = useMemo(
-    () => playerRegistry.map((p) => ({ value: p.name, label: p.name, id: p.id })),
-    [playerRegistry]
-  );
+  const playerOptions = useMemo(() => {
+    const options = playerRegistry.map((p) => ({
+      value: p.name,
+      label: p.name,
+      id: p.id,
+    }));
+    if (
+      userProfile &&
+      !options.some((opt) => opt.value === userProfile.display_name)
+    ) {
+      options.unshift({
+        value: userProfile.display_name,
+        label: userProfile.display_name,
+        id: userProfile.user_id,
+      });
+    }
+    return options;
+  }, [playerRegistry, userProfile]);
   const opponentOptions = useMemo(() => {
     const set = new Set<string>();
     history.forEach((h) => {
@@ -463,8 +549,11 @@ export default function Home() {
       }
     });
     playerRegistry.forEach((p) => set.add(p.name));
+    if (userProfile) {
+      set.add(userProfile.display_name);
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ja"));
-  }, [history, playerRegistry]);
+  }, [history, playerRegistry, userProfile]);
 
 
   // -- Auto-save current state
@@ -584,13 +673,34 @@ export default function Home() {
       return;
     }
 
+    const namesForSave: Record<PlayerKey, string> = {
+      A: playerNames.A || "",
+      B: playerNames.B || "",
+      C: playerNames.C || "",
+      D: playerNames.D || "",
+    };
+    if (userProfile?.display_name) {
+      if (!namesForSave.A || namesForSave.A === "A") {
+        namesForSave.A = userProfile.display_name;
+      }
+    }
+    const normalizedNames: Record<PlayerKey, string> = {
+      A: namesForSave.A || "A",
+      B: namesForSave.B || "B",
+      C: namesForSave.C || "C",
+      D: namesForSave.D || "D",
+    };
+    if (normalizedNames.A !== playerNames.A) {
+      setPlayerNames((prev) => ({ ...prev, A: normalizedNames.A }));
+    }
+
     const record = {
       user_id: user.id,
       game_date: gameDateVal,
-      player_a: playerNames.A || "A",
-      player_b: playerNames.B || "B",
-      player_c: playerNames.C || "C",
-      player_d: playerNames.D || "D",
+      player_a: normalizedNames.A,
+      player_b: normalizedNames.B,
+      player_c: normalizedNames.C,
+      player_d: normalizedNames.D,
       score_a: pts.A ?? 0,
       score_b: pts.B ?? 0,
       score_c: pts.C ?? 0,
@@ -621,7 +731,7 @@ export default function Home() {
           : null,
       snapshot: {
         rows,
-        playerNames,
+        playerNames: normalizedNames,
         umaType,
         customUma,
         tobiBonus,
@@ -630,6 +740,8 @@ export default function Home() {
         chipCustomValue,
         gameDate,
         chipTotals,
+        ownerUserId: user.id,
+        ownerDisplayName: userProfile?.display_name,
       },
     };
 
@@ -883,6 +995,29 @@ export default function Home() {
       return changed ? next : prev;
     });
   }, [playerOptions, playerNames, players]);
+
+  useEffect(() => {
+    if (userProfile) {
+      setProfileInputName(userProfile.display_name);
+    } else {
+      setProfileInputName("");
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (!userProfile) return;
+    setPlayerNames((prev) => {
+      if (prev.A && prev.A !== "A") return prev;
+      if (prev.A === userProfile.display_name) return prev;
+      return { ...prev, A: userProfile.display_name };
+    });
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (userProfile) {
+      setSelectedSelfPlayer(userProfile.display_name);
+    }
+  }, [userProfile]);
   const totalWithChips: Record<PlayerKey, number> = players.reduce(
     (acc, p) => {
       const base = totalScores[p];
@@ -1083,6 +1218,49 @@ export default function Home() {
             ログアウト
           </button>
         </div>
+
+        {/* ユーザープロファイル */}
+        <section className="mb-6 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
+          <h2 className="text-sm font-medium text-white">あなたのユーザー名</h2>
+          <p className="mt-1 text-xs text-zinc-400">
+            ログイン中のアカウントに紐づく名前です。対戦成績などで「自分」として利用されます。
+          </p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <input
+              type="text"
+              value={profileInputName}
+              onChange={(e) => setProfileInputName(e.target.value)}
+              placeholder="例: おおにし"
+              className="w-full sm:w-60 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            />
+            <button
+              onClick={() => upsertUserProfile(profileInputName)}
+              className="w-full sm:w-auto rounded border border-emerald-500 bg-emerald-600/80 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:opacity-60"
+              disabled={profileSaving}
+            >
+              {profileSaving
+                ? "保存中..."
+                : userProfile
+                  ? "ユーザー名を更新"
+                  : "ユーザー名を登録"}
+            </button>
+          </div>
+          {profileMessage && (
+            <div className="mt-2 text-xs text-amber-300">{profileMessage}</div>
+          )}
+          {userProfile ? (
+            <div className="mt-2 text-xs text-zinc-400">
+              現在登録されているユーザー名:{" "}
+              <span className="font-medium text-zinc-100">
+                {userProfile.display_name}
+              </span>
+            </div>
+          ) : (
+            <div className="mt-2 text-xs text-amber-300">
+              まだユーザー名が登録されていません。まずは登録してください。
+            </div>
+          )}
+        </section>
 
         {/* プレイヤー管理 */}
         <section className="mb-6 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
