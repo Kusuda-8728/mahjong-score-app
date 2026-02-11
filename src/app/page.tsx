@@ -843,6 +843,60 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
+          <h2 className="text-sm font-medium text-white">プレイヤー設定</h2>
+          <p className="mt-1 text-xs text-zinc-400">
+            登録済みのプレイヤーや直接入力した名前は自動的にスコア表へ反映されます。
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {players.map((p) => (
+              <div key={`player-config-${p}`} className="rounded border border-zinc-700 bg-zinc-900/80 px-3 py-3">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span>{p}</span>
+                  <span className="text-zinc-300">{playerNames[p] || p}</span>
+                </div>
+                <div className="mt-2 flex flex-col gap-2">
+                  <select
+                    value={selectedPlayers[p] ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedPlayers((prev) => ({
+                        ...prev,
+                        [p]: value ? value : null,
+                      }));
+                      if (value) {
+                        setPlayerNames((prev) => ({ ...prev, [p]: value }));
+                      }
+                    }}
+                    className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+                  >
+                    <option value="">選択</option>
+                    {playerOptions.map((opt) => (
+                      <option key={opt.id} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={playerNames[p]}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedPlayers((prev) => ({ ...prev, [p]: null }));
+                      setPlayerNames((prev) => ({
+                        ...prev,
+                        [p]: value || p,
+                      }));
+                    }}
+                    placeholder={`${p}の名前を入力`}
+                    className="rounded border border-zinc-700 bg-transparent px-2 py-1 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <div className="mb-2 text-xs text-zinc-500">
           登録済みプレイヤーの編集は{" "}
           <Link href="/profile" className="text-emerald-300 hover:text-emerald-200 underline underline-offset-2">
@@ -854,56 +908,15 @@ export default function Home() {
           <table className="min-w-full border-collapse text-xs">
             <thead>
               <tr>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1" rowSpan={2}>局数</th>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1" rowSpan={2}>✅ / 飛賞</th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">局数</th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">✅ / 飛賞</th>
                 {players.map((p, idx) => (
                   <th key={p} className={`border border-zinc-600 bg-zinc-900 px-1 py-1 text-center font-bold ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
-                    {p}
-                  </th>
-                ))}
-              </tr>
-              <tr>
-                {players.map((p, idx) => (
-                  <th
-                    key={p}
-                    className={`border border-zinc-600 bg-zinc-800 px-1 py-1 text-center ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}
-                  >
-                    <div className="flex flex-col gap-1">
-                      <select
-                        value={selectedPlayers[p] ?? ""}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setSelectedPlayers((prev) => ({
-                            ...prev,
-                            [p]: value ? value : null,
-                          }));
-                          if (value) {
-                            setPlayerNames((prev) => ({ ...prev, [p]: value }));
-                          }
-                        }}
-                        className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-                      >
-                        <option value="">選択</option>
-                        {playerOptions.map((opt) => (
-                          <option key={opt.id} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={playerNames[p]}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setSelectedPlayers((prev) => ({ ...prev, [p]: null }));
-                          setPlayerNames((prev) => ({
-                            ...prev,
-                            [p]: value || p,
-                          }));
-                        }}
-                        placeholder={`${p}の名前を入力`}
-                        className="w-full rounded border border-zinc-700 bg-transparent px-1 py-0.5 text-center text-xs font-medium text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-                      />
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span>{p}</span>
+                      <span className="max-w-[64px] truncate text-[10px] text-zinc-300">
+                        {playerNames[p] || p}
+                      </span>
                     </div>
                   </th>
                 ))}
