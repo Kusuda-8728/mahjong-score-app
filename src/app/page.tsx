@@ -775,7 +775,7 @@ export default function Home() {
   };
 
   const loadHistoryEntry = (id: number) => {
-    const entry = history.find((h) => h.id === id);
+    const entry = history.find((h) => h.id === String(id));
     if (!entry) return;
     const s = entry.snapshot;
     if (s) {
@@ -1359,8 +1359,8 @@ export default function Home() {
               </div>
               <div className="space-y-2 max-h-80 overflow-y-auto">
                 {history.length === 0 && <div className="text-zinc-500">履歴がありません</div>}
-                {history.map((h) => (
-                  <div key={h.id} className="flex items-center justify-between border border-zinc-700 rounded px-3 py-2">
+        {history.map((h) => (
+          <div key={h.id} className="flex items-center justify-between border border-zinc-700 rounded px-3 py-2">
                     <div>
                       <div className="text-sm text-zinc-200">{h.name}</div>
                       <div className="text-xs text-zinc-500">
@@ -1368,7 +1368,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => loadHistoryEntry(h.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
+              <button onClick={() => loadHistoryEntry(Number(h.id))} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
                       <button onClick={async () => {
                         if (!confirm('この履歴を削除しますか？')) return;
                         try {
