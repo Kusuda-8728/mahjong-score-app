@@ -883,7 +883,7 @@ export default function Home() {
                         }}
                         className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
                       >
-                        <option value="">登録から選択</option>
+                        <option value="">選択</option>
                         {playerOptions.map((opt) => (
                           <option key={opt.id} value={opt.value}>
                             {opt.label}
@@ -998,19 +998,19 @@ export default function Home() {
             onClick={addRow}
             className="rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-700"
           >
-            局を追加
+            局追加
           </button>
           <button
             onClick={saveCurrentToHistory}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
           >
-            今の対局を保存
+            保存
           </button>
           <button
             onClick={() => setShowHistoryModal(true)}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
           >
-            履歴を見る
+            履歴
           </button>
           <button
             onClick={computeAggregateStats}
