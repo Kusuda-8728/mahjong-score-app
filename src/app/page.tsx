@@ -779,7 +779,30 @@ export default function Home() {
     if (!entry) return;
     const s = entry.snapshot;
     if (s) {
-      if (s.rows) setRows(s.rows);
+      if (s.rows) {
+        const normalizedRows: RowData[] = s.rows.map((row) => ({
+          points: {
+            A: row.points?.A ?? "",
+            B: row.points?.B ?? "",
+            C: row.points?.C ?? "",
+            D: row.points?.D ?? "",
+          },
+          ranks: {
+            A: row.ranks?.A ?? 0,
+            B: row.ranks?.B ?? 0,
+            C: row.ranks?.C ?? 0,
+            D: row.ranks?.D ?? 0,
+          },
+          scores: {
+            A: row.scores?.A ?? 0,
+            B: row.scores?.B ?? 0,
+            C: row.scores?.C ?? 0,
+            D: row.scores?.D ?? 0,
+          },
+          tobiPlayer: row.tobiPlayer ?? "",
+        }));
+        setRows(normalizedRows);
+      }
       if (s.playerNames) setPlayerNames(s.playerNames);
       if (s.umaType) setUmaType(s.umaType);
       if (s.customUma) setCustomUma(s.customUma);
