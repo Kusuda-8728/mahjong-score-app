@@ -1242,7 +1242,7 @@ export default function Home() {
                 "bg-amber-400", // 1着: ゴールド/黄
                 "bg-blue-400", // 2着: シルバー/青
                 "bg-amber-700", // 3着: ブロンズ/茶
-                "bg-zinc-600", // 4着: ダークグレー/黒
+                "bg-lime-500", // 4着: 黄緑
               ];
               const rankLabels = ["1着", "2着", "3着", "4着"];
               return (
