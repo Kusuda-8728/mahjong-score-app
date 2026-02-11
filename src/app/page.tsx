@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase";
+import type { User } from "@supabase/supabase-js";
 
 const STARTING_POINTS = 30000;
 const VALID_TOTALS = [100000, 120000] as const;
@@ -21,6 +22,76 @@ interface RowData {
   ranks: Record<PlayerKey, number>;
   scores: Record<PlayerKey, number>;
   tobiPlayer: PlayerKey | "";
+}
+
+interface SnapshotRowData {
+  points?: Record<PlayerKey, number | "">;
+  ranks?: Record<PlayerKey, number>;
+  scores?: Record<PlayerKey, number>;
+  tobiPlayer?: PlayerKey | "";
+}
+
+interface SnapshotData {
+  rows?: SnapshotRowData[];
+  playerNames?: Record<PlayerKey, string>;
+  umaType?: string;
+  customUma?: [string, string, string, string];
+  tobiBonus?: number | string;
+  oka?: number | string;
+  chipValueType?: "none" | "500" | "1000" | "custom";
+  chipCustomValue?: number | string;
+  gameDate?: string;
+  chipTotals?: Record<PlayerKey, number | string | "" | "-">;
+}
+
+interface MatchRow {
+  id: string;
+  created_at: string;
+  game_date: string | null;
+  player_a: string | null;
+  player_b: string | null;
+  player_c: string | null;
+  player_d: string | null;
+  score_a: number | null;
+  score_b: number | null;
+  score_c: number | null;
+  score_d: number | null;
+  chip_a: number | null;
+  chip_b: number | null;
+  chip_c: number | null;
+  chip_d: number | null;
+  uma_type: string | null;
+  custom_uma: number[] | null;
+  tobi_bonus: number | null;
+  oka: number | null;
+  chip_value_type: string | null;
+  chip_custom_value: number | null;
+  snapshot: SnapshotData | null;
+}
+
+interface HistoryEntry {
+  id: string;
+  name: string;
+  date: string;
+  players: Record<PlayerKey, string>;
+  topPlayer: PlayerKey;
+  snapshot: SnapshotData;
+}
+
+interface AggregatePlayerStats {
+  name: string;
+  games: number;
+  totalScore: number;
+  sumRank: number;
+  rankDist: [number, number, number, number];
+  tobiCount: number;
+  gamesWithTobiRule: number;
+  chipSum: number;
+  chipGames: number;
+  avgRank?: number;
+  rankPct?: number[];
+  tobiRate?: number;
+  avgChip?: number | null;
 }
 
 function calculateRankAndScore(
@@ -101,10 +172,12 @@ const initialRow: RowData = {
   scores: { A: 0, B: 0, C: 0, D: 0 },
   tobiPlayer: "",
 };
+const PLAYER_KEYS: PlayerKey[] = ["A", "B", "C", "D"];
 
 export default function Home() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [rows, setRows] = useState<RowData[]>([
     {
@@ -120,13 +193,24 @@ export default function Home() {
     Record<PlayerKey, number | "" | "-">
   >({ A: "", B: "", C: "", D: "" });
   const [oka, setOka] = useState<string>("0"); // オカ（pt単位、例: 20.0）
-  const [history, setHistory] = useState<Array<any>>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showNewConfirm, setShowNewConfirm] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [backupText, setBackupText] = useState<string>("");
   const [showAggregateModal, setShowAggregateModal] = useState(false);
-  const [aggregateStats, setAggregateStats] = useState<Record<string, any> | null>(null);
+  const [aggregateStats, setAggregateStats] = useState<Record<string, AggregatePlayerStats> | null>(null);
+  const [playerRegistry, setPlayerRegistry] = useState<Array<{ id: string; name: string }>>([]);
+  const [newPlayerName, setNewPlayerName] = useState("");
+  const [playerMessage, setPlayerMessage] = useState<string | null>(null);
+  const [playersLoading, setPlayersLoading] = useState(false);
+  const [selectedPlayers, setSelectedPlayers] = useState<Record<PlayerKey, string | null>>({
+    A: null,
+    B: null,
+    C: null,
+    D: null,
+  });
+  const [selectedSelfPlayer, setSelectedSelfPlayer] = useState("");
+  const [selectedOpponentPlayer, setSelectedOpponentPlayer] = useState("");
 
   const [gameDate, setGameDate] = useState<string>(() => {
     const d = new Date();
@@ -192,31 +276,48 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- derived from state
   }, [umaType, customUma.join(","), tobiBonus, oka]);
 
+  const fetchPlayers = async () => {
+    try {
+      setPlayersLoading(true);
+      const { data, error } = await supabase
+        .from("players")
+        .select("id, name")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      setPlayerRegistry((data ?? []).map((p) => ({ id: p.id, name: p.name })));
+    } catch (e) {
+      console.error("fetch players failed", e);
+      setPlayerMessage("プレイヤー一覧の取得に失敗しました。");
+    } finally {
+      setPlayersLoading(false);
+    }
+  };
+
   const fetchHistory = async () => {
     try {
       const { data, error } = await supabase
         .from("matches")
-        .select("*")
+        .select<MatchRow>("*")
         .order("game_date", { ascending: false });
       if (error) throw error;
-      const entries = (data || []).map((m: any) => {
+      const entries: HistoryEntry[] = (data ?? []).map((m) => {
         const players = {
-          A: m.player_a || "A",
-          B: m.player_b || "B",
-          C: m.player_c || "C",
-          D: m.player_d || "D",
+          A: (m.player_a ?? "A") || "A",
+          B: (m.player_b ?? "B") || "B",
+          C: (m.player_c ?? "C") || "C",
+          D: (m.player_d ?? "D") || "D",
         };
         const scores = { A: m.score_a ?? 0, B: m.score_b ?? 0, C: m.score_c ?? 0, D: m.score_d ?? 0 };
         let top: PlayerKey = "A";
         (["A", "B", "C", "D"] as const).forEach((k) => {
           if (scores[k] > scores[top]) top = k;
         });
-        const gd = m.game_date || "";
+        const gd = m.game_date ?? "";
         const name =
           gd.length >= 10
             ? `${gd.slice(0, 4)}/${gd.slice(5, 7)}/${gd.slice(8, 10)} ${Object.values(players).join("、")}`
             : `${Object.values(players).join("、")}`;
-        const snap = m.snapshot || {};
+        const snap: SnapshotData = m.snapshot ?? {};
         return {
           id: m.id,
           name,
@@ -225,20 +326,29 @@ export default function Home() {
           topPlayer: top,
           snapshot: {
             rows: snap.rows,
-            playerNames: snap.playerNames || players,
-            umaType: snap.umaType ?? m.uma_type,
-            customUma: snap.customUma ?? [String(m.custom_uma?.[0] ?? 30), String(m.custom_uma?.[1] ?? 10), String(m.custom_uma?.[2] ?? -10), String(m.custom_uma?.[3] ?? -30)],
-            tobiBonus: snap.tobiBonus ?? m.tobi_bonus,
-            oka: snap.oka ?? m.oka,
-            chipValueType: snap.chipValueType ?? m.chip_value_type,
-            chipCustomValue: snap.chipCustomValue ?? m.chip_custom_value,
+            playerNames: snap.playerNames ?? players,
+            umaType: snap.umaType ?? m.uma_type ?? undefined,
+            customUma:
+              snap.customUma ??
+              [
+                String(m.custom_uma?.[0] ?? 30),
+                String(m.custom_uma?.[1] ?? 10),
+                String(m.custom_uma?.[2] ?? -10),
+                String(m.custom_uma?.[3] ?? -30),
+              ],
+            tobiBonus: snap.tobiBonus ?? m.tobi_bonus ?? undefined,
+            oka: snap.oka ?? m.oka ?? undefined,
+            chipValueType: snap.chipValueType ?? (m.chip_value_type as SnapshotData["chipValueType"]) ?? undefined,
+            chipCustomValue: snap.chipCustomValue ?? m.chip_custom_value ?? undefined,
             gameDate: snap.gameDate ?? gd,
-            chipTotals: snap.chipTotals ?? {
-              A: m.chip_a ?? "",
-              B: m.chip_b ?? "",
-              C: m.chip_c ?? "",
-              D: m.chip_d ?? "",
-            },
+            chipTotals:
+              snap.chipTotals ??
+              ({
+                A: m.chip_a ?? "",
+                B: m.chip_b ?? "",
+                C: m.chip_c ?? "",
+                D: m.chip_d ?? "",
+              } as Record<PlayerKey, number | string | "" | "-">),
           },
         };
       });
@@ -256,6 +366,7 @@ export default function Home() {
         router.replace("/login");
         return;
       }
+      setCurrentUser(session.user);
       setAuthChecked(true);
 
       try {
@@ -278,10 +389,73 @@ export default function Home() {
       } catch (e) {
         console.error("load saved failed", e);
       }
-      await fetchHistory();
+      await Promise.all([fetchPlayers(), fetchHistory()]);
     };
     init();
   }, [router]);
+  const handleAddPlayer = async () => {
+    const trimmed = newPlayerName.trim();
+    if (!trimmed) {
+      setPlayerMessage("プレイヤー名を入力してください。");
+      return;
+    }
+    if (!currentUser) {
+      setPlayerMessage("ユーザー情報を取得できません。再度ログインしてください。");
+      return;
+    }
+    try {
+      setPlayerMessage(null);
+      const exists = playerRegistry.some(
+        (p) => p.name.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (exists) {
+        setPlayerMessage("同じ名前のプレイヤーが登録されています。");
+        return;
+      }
+      const { error } = await supabase
+        .from("players")
+        .insert({ name: trimmed, user_id: currentUser.id });
+      if (error) throw error;
+      setNewPlayerName("");
+      setPlayerMessage("プレイヤーを追加しました。");
+      await fetchPlayers();
+    } catch (e) {
+      console.error("add player failed", e);
+      setPlayerMessage("プレイヤーの追加に失敗しました。");
+    }
+  };
+
+  const handleDeletePlayer = async (id: string) => {
+    if (!confirm("このプレイヤーを削除しますか？")) return;
+    try {
+      const { error } = await supabase.from("players").delete().eq("id", id);
+      if (error) throw error;
+      setPlayerMessage("プレイヤーを削除しました。");
+      await fetchPlayers();
+    } catch (e) {
+      console.error("delete player failed", e);
+      setPlayerMessage("プレイヤーの削除に失敗しました。");
+    }
+  };
+
+  const playerOptions = useMemo(
+    () => playerRegistry.map((p) => ({ value: p.name, label: p.name, id: p.id })),
+    [playerRegistry]
+  );
+  const opponentOptions = useMemo(() => {
+    const set = new Set<string>();
+    history.forEach((h) => {
+      if (h?.snapshot?.playerNames) {
+        Object.values(h.snapshot.playerNames).forEach((name) => {
+          const trimmed = name.trim();
+          if (trimmed) set.add(trimmed);
+        });
+      }
+    });
+    playerRegistry.forEach((p) => set.add(p.name));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ja"));
+  }, [history, playerRegistry]);
+
 
   // -- Auto-save current state
   useEffect(() => {
@@ -372,7 +546,7 @@ export default function Home() {
   };
 
   // Save current session to Supabase matches table
-  const saveCurrentToHistory = async (name?: string) => {
+  const saveCurrentToHistory = async () => {
     const completed = rows.filter((r) =>
       ["A", "B", "C", "D"].every((k) => typeof r.points[k as PlayerKey] === "number")
     );
@@ -460,36 +634,33 @@ export default function Home() {
     }
   };
 
-  // Compute aggregated stats from Supabase history (rule-based filtering)
-  const computeAggregateStats = () => {
-    const map: Record<string, any> = {};
-    const playersArr = ["A", "B", "C", "D"] as const;
+  const buildAggregateStats = (source: HistoryEntry[]): Record<string, AggregatePlayerStats> => {
+    const map: Record<string, AggregatePlayerStats> = {};
 
-    history.forEach((h: any) => {
-      const snap = h.snapshot;
-      if (!snap || !snap.rows) return;
+    source.forEach((entry) => {
+      const snap = entry.snapshot;
+      if (!snap.rows || !snap.playerNames) return;
 
-      const tobiBonusNum = Math.max(0, parseInt(String(snap.tobiBonus ?? snap.tobi_bonus ?? 0), 10) || 0);
-      const chipType = snap.chipValueType ?? snap.chip_value_type;
+      const tobiBonusNum = Math.max(0, parseInt(String(snap.tobiBonus ?? 0), 10) || 0);
       const chipVal =
-        chipType === "none"
+        !snap.chipValueType || snap.chipValueType === "none"
           ? 0
-          : chipType === "500"
+          : snap.chipValueType === "500"
             ? 500
-            : chipType === "1000"
+            : snap.chipValueType === "1000"
               ? 1000
-              : Math.max(0, parseInt(String(snap.chipCustomValue ?? snap.chip_custom_value ?? 0), 10) || 0);
+              : Math.max(0, parseInt(String(snap.chipCustomValue ?? 0), 10) || 0);
       const hasTobiRule = tobiBonusNum > 0;
       const hasChipRule = chipVal > 0;
 
-      snap.rows.forEach((r: any) => {
-        const pts = playersArr.map((k) => r.points?.[k]);
-        if (pts.some((v: unknown) => typeof v !== "number")) return;
+      snap.rows.forEach((row) => {
+        const pts = PLAYER_KEYS.map((k) => row.points?.[k]);
+        if (pts.some((v) => typeof v !== "number")) return;
 
-        const hasTobi = pts.some((v: unknown) => typeof v === "number" && v < 0);
+        const hasTobi = pts.some((v) => typeof v === "number" && v < 0);
 
-        playersArr.forEach((k) => {
-          const name = (snap.playerNames && snap.playerNames[k]) || (snap as any)[`player_${k.toLowerCase()}`] || k;
+        PLAYER_KEYS.forEach((k) => {
+          const name = snap.playerNames?.[k] ?? k;
           const normalized = String(name).trim();
           if (!map[normalized]) {
             map[normalized] = {
@@ -504,47 +675,61 @@ export default function Home() {
               chipGames: 0,
             };
           }
-          const entry = map[normalized];
-          const rank = r.ranks?.[k];
-          const score = r.scores?.[k] ?? 0;
+          const entryStats = map[normalized];
+          const rankVal = row.ranks?.[k];
+          const scoreVal = row.scores?.[k] ?? 0;
 
-          if (typeof rank === "number" && rank >= 1 && rank <= 4) {
-            entry.games += 1;
-            entry.totalScore += score;
-            entry.sumRank += rank;
-            entry.rankDist[rank - 1] += 1;
+          if (typeof rankVal === "number" && rankVal >= 1 && rankVal <= 4) {
+            entryStats.games += 1;
+            entryStats.totalScore += scoreVal;
+            entryStats.sumRank += rankVal;
+            entryStats.rankDist[rankVal - 1] += 1;
 
             if (hasTobiRule) {
-              entry.gamesWithTobiRule += 1;
-              if (hasTobi && rank === 4) entry.tobiCount += 1;
+              entryStats.gamesWithTobiRule += 1;
+              if (hasTobi && rankVal === 4) entryStats.tobiCount += 1;
             }
           }
         });
       });
 
-      // chipTotals は対局単位で1回だけ加算（chip_value_type が none でない対局のみ）
-      if (hasChipRule && (snap.chipTotals || snap.chip_a != null || snap.chip_b != null)) {
-        playersArr.forEach((k) => {
-          const name = (snap.playerNames && snap.playerNames[k]) || (snap as any)[`player_${k.toLowerCase()}`] || k;
+      if (hasChipRule && snap.chipTotals) {
+        PLAYER_KEYS.forEach((k) => {
+          const name = snap.playerNames?.[k] ?? k;
           const normalized = String(name).trim();
           if (!map[normalized]) return;
-          const chip = snap.chipTotals?.[k] ?? (snap as any)[`chip_${k.toLowerCase()}`];
-          if (typeof chip === "number") {
-            map[normalized].chipSum += chip;
+          const raw = snap.chipTotals?.[k];
+          let chipCount = 0;
+          if (typeof raw === "number") chipCount = raw;
+          else if (typeof raw === "string") {
+            const trimmed = raw.trim();
+            if (trimmed !== "" && trimmed !== "-") {
+              const parsed = Number(trimmed);
+              chipCount = Number.isFinite(parsed) ? parsed : 0;
+            }
+          }
+          if (chipCount !== 0) {
+            map[normalized].chipSum += chipCount;
             map[normalized].chipGames += 1;
           }
         });
       }
     });
 
-    Object.values(map).forEach((v: any) => {
+    Object.values(map).forEach((v) => {
       v.avgRank = v.games > 0 ? v.sumRank / v.games : 0;
-      v.rankPct = v.games > 0 ? v.rankDist.map((c: number) => (c / v.games) * 100) : [0, 0, 0, 0];
+      v.rankPct = v.games > 0 ? v.rankDist.map((c) => (c / v.games) * 100) : [0, 0, 0, 0];
       v.tobiRate =
         v.gamesWithTobiRule > 0 ? (v.tobiCount / v.gamesWithTobiRule) * 100 : 0;
       v.avgChip = v.chipGames > 0 ? v.chipSum / v.chipGames : null;
     });
 
+    return map;
+  };
+
+  // Compute aggregated stats from Supabase history (rule-based filtering)
+  const computeAggregateStats = () => {
+    const map = buildAggregateStats(history);
     setAggregateStats(map);
     setShowAggregateModal(true);
   };
@@ -552,74 +737,7 @@ export default function Home() {
   // 履歴が更新された際、ダッシュボード表示中なら即座に再計算
   useEffect(() => {
     if (!showAggregateModal) return;
-    const map: Record<string, any> = {};
-    const playersArr = ["A", "B", "C", "D"] as const;
-
-    history.forEach((h: any) => {
-      const snap = h.snapshot;
-      if (!snap || !snap.rows) return;
-
-      const tobiBonusNum = Math.max(0, parseInt(String(snap.tobiBonus ?? snap.tobi_bonus ?? 0), 10) || 0);
-      const chipVal =
-        (snap.chipValueType ?? snap.chip_value_type) === "none"
-          ? 0
-          : (snap.chipValueType ?? snap.chip_value_type) === "500"
-            ? 500
-            : (snap.chipValueType ?? snap.chip_value_type) === "1000"
-              ? 1000
-              : Math.max(0, parseInt(String(snap.chipCustomValue ?? snap.chip_custom_value ?? 0), 10) || 0);
-      const hasTobiRule = tobiBonusNum > 0;
-      const hasChipRule = chipVal > 0;
-
-      snap.rows.forEach((r: any) => {
-        const pts = playersArr.map((k) => r.points?.[k]);
-        if (pts.some((v: unknown) => typeof v !== "number")) return;
-        const hasTobi = pts.some((v: unknown) => typeof v === "number" && v < 0);
-
-        playersArr.forEach((k) => {
-          const name = (snap.playerNames && snap.playerNames[k]) || (snap as any)[`player_${k.toLowerCase()}`] || k;
-          const normalized = String(name).trim();
-          if (!map[normalized]) {
-            map[normalized] = { name: normalized, games: 0, totalScore: 0, sumRank: 0, rankDist: [0, 0, 0, 0], tobiCount: 0, gamesWithTobiRule: 0, chipSum: 0, chipGames: 0 };
-          }
-          const entry = map[normalized];
-          const rank = r.ranks?.[k];
-          const score = r.scores?.[k] ?? 0;
-          if (typeof rank === "number" && rank >= 1 && rank <= 4) {
-            entry.games += 1;
-            entry.totalScore += score;
-            entry.sumRank += rank;
-            entry.rankDist[rank - 1] += 1;
-            if (hasTobiRule) {
-              entry.gamesWithTobiRule += 1;
-              if (hasTobi && rank === 4) entry.tobiCount += 1;
-            }
-          }
-        });
-      });
-
-      if (hasChipRule && snap.chipTotals) {
-        playersArr.forEach((k) => {
-          const name = (snap.playerNames && snap.playerNames[k]) || (snap as any)[`player_${k.toLowerCase()}`] || k;
-          const normalized = String(name).trim();
-          if (!map[normalized]) return;
-          const chip = snap.chipTotals[k] ?? (snap as any)[`chip_${k.toLowerCase()}`];
-          if (typeof chip === "number") {
-            map[normalized].chipSum += chip;
-            map[normalized].chipGames += 1;
-          }
-        });
-      }
-    });
-
-    Object.values(map).forEach((v: any) => {
-      v.avgRank = v.games > 0 ? v.sumRank / v.games : 0;
-      v.rankPct = v.games > 0 ? v.rankDist.map((c: number) => (c / v.games) * 100) : [0, 0, 0, 0];
-      v.tobiRate = v.gamesWithTobiRule > 0 ? (v.tobiCount / v.gamesWithTobiRule) * 100 : 0;
-      v.avgChip = v.chipGames > 0 ? v.chipSum / v.chipGames : null;
-    });
-
-    setAggregateStats(map);
+    setAggregateStats(buildAggregateStats(history));
   }, [history, showAggregateModal]);
 
   // Export history to text for backup display
@@ -687,7 +805,19 @@ export default function Home() {
     setChipTotals({ A: "", B: "", C: "", D: "" });
   };
 
-  const players: PlayerKey[] = ["A", "B", "C", "D"];
+  const players = PLAYER_KEYS;
+  useEffect(() => {
+    setSelectedPlayers((prev) => {
+      const next: Record<PlayerKey, string | null> = { A: null, B: null, C: null, D: null };
+      let changed = false;
+      players.forEach((p) => {
+        const match = playerOptions.find((opt) => opt.value === playerNames[p]);
+        next[p] = match ? match.value : null;
+        if (prev[p] !== next[p]) changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [playerOptions, playerNames, players]);
   const totalWithChips: Record<PlayerKey, number> = players.reduce(
     (acc, p) => {
       const base = totalScores[p];
@@ -700,8 +830,6 @@ export default function Home() {
     },
     { A: 0, B: 0, C: 0, D: 0 } as Record<PlayerKey, number>
   );
-
-  const subHeaders = ["順位", "持ち点", "スコア"];
 
   const completedRows = rows.filter(
     (r) =>
@@ -749,6 +877,112 @@ export default function Home() {
     };
   });
 
+  const headToHeadStats = useMemo(() => {
+    const selfName = selectedSelfPlayer.trim();
+    const opponentName = selectedOpponentPlayer.trim();
+    if (!selfName || !opponentName || selfName === opponentName) return null;
+
+    const stats = {
+      matches: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      totalScoreSelf: 0,
+      totalScoreOpponent: 0,
+      totalRankSelf: 0,
+      totalRankOpponent: 0,
+    };
+
+    history.forEach((h) => {
+      const snap = h.snapshot;
+      if (!snap || !snap.rows || !snap.playerNames) return;
+      const entries = Object.entries(snap.playerNames) as Array<[PlayerKey, string]>;
+      const selfEntry = entries.find(([, name]) => String(name ?? "").trim() === selfName);
+      const opponentEntry = entries.find(([, name]) => String(name ?? "").trim() === opponentName);
+      if (!selfEntry || !opponentEntry) return;
+
+      const rows = snap.rows ?? [];
+      const finalRow = [...rows]
+        .reverse()
+        .find((row) =>
+          players.every(
+            (p) =>
+              typeof row.points?.[p] === "number" &&
+              typeof row.ranks?.[p] === "number" &&
+              typeof row.scores?.[p] === "number"
+          )
+        );
+      if (!finalRow) return;
+
+      const scoreTotals = players.reduce<Record<PlayerKey, number>>((acc, key) => {
+        acc[key] = rows.reduce((sum, row) => {
+          const val = row.scores?.[key];
+          return sum + (typeof val === "number" ? val : 0);
+        }, 0);
+        return acc;
+      }, { A: 0, B: 0, C: 0, D: 0 });
+
+      const chipValue =
+        snap.chipValueType === "none"
+          ? 0
+          : snap.chipValueType === "500"
+            ? 500
+            : snap.chipValueType === "1000"
+              ? 1000
+              : Math.max(0, parseInt(String(snap.chipCustomValue ?? 0), 10) || 0);
+
+      const chipTotals = players.reduce<Record<PlayerKey, number>>((acc, key) => {
+        const raw = snap.chipTotals?.[key];
+        if (typeof raw === "number") acc[key] = raw;
+        else if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          if (trimmed === "" || trimmed === "-") acc[key] = 0;
+          else {
+            const parsed = Number(trimmed);
+            acc[key] = Number.isFinite(parsed) ? parsed : 0;
+          }
+        } else acc[key] = 0;
+        return acc;
+      }, { A: 0, B: 0, C: 0, D: 0 });
+
+      const totalsWithChips = players.reduce<Record<PlayerKey, number>>((acc, key) => {
+        const chipScore = chipValue > 0 ? (chipTotals[key] * chipValue) / 1000 : 0;
+        acc[key] = Math.round((scoreTotals[key] + chipScore) * 10) / 10;
+        return acc;
+      }, { A: 0, B: 0, C: 0, D: 0 });
+
+      const selfKey = selfEntry[0];
+      const opponentKey = opponentEntry[0];
+      const selfScore = totalsWithChips[selfKey];
+      const opponentScore = totalsWithChips[opponentKey];
+
+      stats.matches += 1;
+      stats.totalScoreSelf += selfScore;
+      stats.totalScoreOpponent += opponentScore;
+
+      const selfRank = finalRow.ranks?.[selfKey] ?? 0;
+      const opponentRank = finalRow.ranks?.[opponentKey] ?? 0;
+      stats.totalRankSelf += selfRank;
+      stats.totalRankOpponent += opponentRank;
+
+      if (selfScore > opponentScore) stats.wins += 1;
+      else if (selfScore < opponentScore) stats.losses += 1;
+      else stats.draws += 1;
+    });
+
+    if (stats.matches === 0) return { matches: 0 };
+
+    return {
+      ...stats,
+      averageRankSelf: stats.totalRankSelf / stats.matches,
+      averageRankOpponent: stats.totalRankOpponent / stats.matches,
+      averageScoreSelf: stats.totalScoreSelf / stats.matches,
+      averageScoreOpponent: stats.totalScoreOpponent / stats.matches,
+      winRate: stats.wins / stats.matches,
+      scoreDiff: stats.totalScoreSelf - stats.totalScoreOpponent,
+    };
+  }, [history, players, selectedOpponentPlayer, selectedSelfPlayer]);
+
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black text-zinc-400">
@@ -774,6 +1008,56 @@ export default function Home() {
             ログアウト
           </button>
         </div>
+
+        {/* プレイヤー管理 */}
+        <section className="mb-6 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
+          <h2 className="text-sm font-medium text-white">プレイヤー管理</h2>
+          <p className="mt-1 text-xs text-zinc-400">
+            よく使うプレイヤー名を登録しておくと、スコア表で素早く選択できます。
+          </p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <input
+              type="text"
+              value={newPlayerName}
+              onChange={(e) => setNewPlayerName(e.target.value)}
+              placeholder="プレイヤー名"
+              className="w-full sm:w-60 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            />
+            <button
+              onClick={handleAddPlayer}
+              className="w-full sm:w-auto rounded border border-emerald-500 bg-emerald-600/80 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:opacity-60"
+              disabled={playersLoading}
+            >
+              {playersLoading ? "追加中..." : "プレイヤーを追加"}
+            </button>
+          </div>
+          {playerMessage && (
+            <div className="mt-2 text-xs text-amber-300">{playerMessage}</div>
+          )}
+          <div className="mt-4">
+            <h3 className="text-xs font-medium text-zinc-300">登録済みプレイヤー</h3>
+            {playerRegistry.length === 0 ? (
+              <p className="mt-2 text-xs text-zinc-500">まだ登録されていません。</p>
+            ) : (
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {playerRegistry.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+                  >
+                    <span>{p.name}</span>
+                    <button
+                      onClick={() => handleDeletePlayer(p.id)}
+                      className="rounded bg-red-700 px-1 py-0.5 text-[10px] text-white hover:bg-red-600"
+                    >
+                      削除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
 
         {/* 基本情報 */}
         <section className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-3">
@@ -902,13 +1186,47 @@ export default function Home() {
               </tr>
               <tr>
                 {players.map((p, idx) => (
-                  <th key={p} className={`border border-zinc-600 bg-zinc-800 px-1 py-0.5 text-center ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
-                    <input
-                      type="text"
-                      value={playerNames[p]}
-                      onChange={(e) => setPlayerNames((prev) => ({ ...prev, [p]: e.target.value || p }))}
-                      className="w-full bg-transparent text-center text-xs font-medium text-zinc-100 outline-none p-0"
-                    />
+                  <th
+                    key={p}
+                    className={`border border-zinc-600 bg-zinc-800 px-1 py-1 text-center ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <select
+                        value={selectedPlayers[p] ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSelectedPlayers((prev) => ({
+                            ...prev,
+                            [p]: value ? value : null,
+                          }));
+                          if (value) {
+                            setPlayerNames((prev) => ({ ...prev, [p]: value }));
+                          }
+                        }}
+                        className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+                      >
+                        <option value="">登録から選択</option>
+                        {playerOptions.map((opt) => (
+                          <option key={opt.id} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={playerNames[p]}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSelectedPlayers((prev) => ({ ...prev, [p]: null }));
+                          setPlayerNames((prev) => ({
+                            ...prev,
+                            [p]: value || p,
+                          }));
+                        }}
+                        placeholder={`${p}の名前を入力`}
+                        className="w-full rounded border border-zinc-700 bg-transparent px-1 py-0.5 text-center text-xs font-medium text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+                      />
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -1005,7 +1323,7 @@ export default function Home() {
             局を追加
           </button>
           <button
-            onClick={() => saveCurrentToHistory()}
+            onClick={saveCurrentToHistory}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
           >
             今の対局を保存
@@ -1076,7 +1394,7 @@ export default function Home() {
                 <button className="text-xs text-zinc-300" onClick={() => setShowAggregateModal(false)}>閉じる</button>
               </div>
               <div className="grid gap-4 max-h-80 overflow-y-auto">
-                {Object.values(aggregateStats).map((s: any) => (
+                {Object.values(aggregateStats).map((s: AggregatePlayerStats) => (
                   <div key={s.name} className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-white">{s.name}</div>
@@ -1158,6 +1476,102 @@ export default function Home() {
             })}
           </div>
         </div>
+
+        {/* 対戦成績 */}
+        <section className="mt-6 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
+          <h2 className="mb-3 text-sm font-medium text-white">対戦成績（1対1）</h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <label className="text-xs text-zinc-400">自分（登録済みプレイヤーから選択）</label>
+              <select
+                value={selectedSelfPlayer}
+                onChange={(e) => setSelectedSelfPlayer(e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="">選択してください</option>
+                {playerOptions.map((opt) => (
+                  <option key={`self-${opt.id}`} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-zinc-400">対戦相手</label>
+              <select
+                value={selectedOpponentPlayer}
+                onChange={(e) => setSelectedOpponentPlayer(e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="">選択してください</option>
+                {opponentOptions.map((name) => (
+                  <option key={`opponent-${name}`} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="mt-4">
+            {!headToHeadStats ? (
+              <p className="text-xs text-zinc-500">
+                自分と相手を選択すると、該当する対局の成績を表示します。
+              </p>
+            ) : headToHeadStats.matches === 0 ? (
+              <p className="text-xs text-zinc-500">
+                選択した組み合わせの対局は見つかりませんでした。
+              </p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                <div className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
+                  <div className="text-zinc-400">対戦数</div>
+                  <div className="mt-1 text-lg font-semibold text-white">{headToHeadStats.matches}</div>
+                  <div className="mt-2 text-zinc-400">
+                    勝 {headToHeadStats.wins} / 負 {headToHeadStats.losses} / 分 {headToHeadStats.draws}
+                  </div>
+                  <div className="mt-1 text-zinc-400">
+                    勝率 {Math.round(headToHeadStats.winRate * 1000) / 10}%
+                  </div>
+                </div>
+                <div className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
+                  <div className="text-zinc-400">平均順位（自分 / 相手）</div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {headToHeadStats.averageRankSelf.toFixed(2)} / {headToHeadStats.averageRankOpponent.toFixed(2)}
+                  </div>
+                </div>
+                <div className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
+                  <div className="text-zinc-400">通算収支差（順位点＋チップ）</div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {headToHeadStats.scoreDiff > 0 ? "+" : ""}
+                    {headToHeadStats.scoreDiff.toFixed(1)}
+                  </div>
+                  <div className="mt-1 text-zinc-400">
+                    自分平均 {headToHeadStats.averageScoreSelf.toFixed(1)} / 相手平均 {headToHeadStats.averageScoreOpponent.toFixed(1)}
+                  </div>
+                </div>
+                <div className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
+                  <div className="text-zinc-400">最新対戦日</div>
+                  <div className="mt-2 text-sm text-white">
+                    {(() => {
+                      const latest = history.find((h) => {
+                        const snap = h.snapshot;
+                        if (!snap?.playerNames) return false;
+                        const names = Object.values(snap.playerNames).map((n) => String(n ?? "").trim());
+                        return names.includes(selectedSelfPlayer.trim()) && names.includes(selectedOpponentPlayer.trim());
+                      });
+                      if (!latest) return "―";
+                      const gd = latest.snapshot?.gameDate;
+                      if (gd && gd.length >= 10) {
+                        return `${gd.slice(0, 4)}/${gd.slice(5, 7)}/${gd.slice(8, 10)}`;
+                      }
+                      return latest.date ? new Date(latest.date).toLocaleDateString() : "―";
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
 
         <div className="mt-4 flex flex-wrap items-start gap-4">
           {/* チップ精算 */}
