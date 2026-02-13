@@ -1,0 +1,60 @@
+/**
+ * Supabase Auth UI 用 日本語ロケール
+ */
+export const authLocaleJa = {
+  sign_up: {
+    email_label: "メールアドレス",
+    password_label: "パスワードを作成",
+    email_input_placeholder: "メールアドレスを入力",
+    password_input_placeholder: "パスワードを入力",
+    button_label: "新規登録",
+    loading_button_label: "登録中...",
+    social_provider_text: "{{provider}}でログイン",
+    link_text: "アカウントをお持ちでない方：新規登録",
+    confirmation_text: "確認メールをご確認ください",
+  },
+  sign_in: {
+    email_label: "メールアドレス",
+    password_label: "パスワード",
+    email_input_placeholder: "メールアドレスを入力",
+    password_input_placeholder: "パスワードを入力",
+    button_label: "ログイン",
+    loading_button_label: "ログイン中...",
+    social_provider_text: "{{provider}}でログイン",
+    link_text: "すでにアカウントをお持ちの方：ログイン",
+  },
+  magic_link: {
+    email_input_label: "メールアドレス",
+    email_input_placeholder: "メールアドレスを入力",
+    button_label: "マジックリンクを送信",
+    loading_button_label: "送信中...",
+    link_text: "マジックリンクをメールで送信",
+    confirmation_text: "メールのリンクをご確認ください",
+  },
+  forgotten_password: {
+    email_label: "メールアドレス",
+    password_label: "パスワード",
+    email_input_placeholder: "メールアドレスを入力",
+    button_label: "パスワードリセットの手順を送信",
+    loading_button_label: "送信中...",
+    link_text: "パスワードをお忘れですか？",
+    confirmation_text: "メールのリセット用リンクをご確認ください",
+  },
+  update_password: {
+    password_label: "新しいパスワード",
+    password_input_placeholder: "新しいパスワードを入力",
+    button_label: "パスワードを更新",
+    loading_button_label: "更新中...",
+    confirmation_text: "パスワードを更新しました",
+  },
+  verify_otp: {
+    email_input_label: "メールアドレス",
+    email_input_placeholder: "メールアドレスを入力",
+    phone_input_label: "電話番号",
+    phone_input_placeholder: "電話番号を入力",
+    token_input_label: "確認コード",
+    token_input_placeholder: "確認コードを入力",
+    button_label: "確認",
+    loading_button_label: "ログイン中...",
+  },
+};

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Auth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/utils/supabase";
+import { authLocaleJa } from "@/lib/auth-locale-ja";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function LoginPage() {
         <h1 className="text-lg font-medium text-white mb-4 text-center">麻雀スコアアプリ</h1>
         <Auth
           supabaseClient={supabase}
+          localization={{ variables: authLocaleJa }}
           appearance={{
             theme: ThemeSupa,
             variables: {
