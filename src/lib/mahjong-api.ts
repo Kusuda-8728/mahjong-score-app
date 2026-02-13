@@ -321,3 +321,42 @@ export function buildAggregateStats(source: HistoryEntry[]): Record<string, Aggr
 
   return map;
 }
+
+/**
+ * 指定プレイヤーの順位履歴を抽出（直近 maxGames 戦）。
+ * 返却配列は古い順（左＝古い、右＝新しいで表示する想定）。
+ */
+export function extractRankHistory(
+  source: HistoryEntry[],
+  playerName: string,
+  maxGames: number = 50
+): number[] {
+  const normalized = String(playerName).trim();
+  if (!normalized) return [];
+
+  const all: number[] = [];
+  const sorted = [...source].sort(
+    (a, b) =>
+      new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
+  );
+
+  for (const entry of sorted) {
+    const snap = entry.snapshot;
+    if (!snap.rows || !snap.playerNames) continue;
+
+    const playerKey = (PLAYER_KEYS as readonly PlayerKey[]).find(
+      (k) => String(snap.playerNames?.[k] ?? "").trim() === normalized
+    );
+    if (!playerKey) continue;
+
+    for (const row of snap.rows) {
+      const rank = row.ranks?.[playerKey];
+      if (typeof rank === "number" && rank >= 1 && rank <= 4) {
+        all.push(rank);
+      }
+    }
+  }
+
+  const lastN = all.slice(-maxGames);
+  return lastN;
+}

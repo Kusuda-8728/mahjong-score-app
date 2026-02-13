@@ -11,6 +11,7 @@ import {
   normalizeHistoryEntries,
   PLAYER_KEYS,
   buildAggregateStats,
+  extractRankHistory,
 } from "@/lib/mahjong-api";
 import { supabase } from "@/utils/supabase";
 
@@ -33,6 +34,8 @@ export default function StatsPage() {
   const [players, setPlayers] = useState<string[]>([]);
   const [selectedSelf, setSelectedSelf] = useState<string>("");
   const [selectedOpponent, setSelectedOpponent] = useState<string>("");
+  const [selectedChartPlayer, setSelectedChartPlayer] = useState<string>("");
+  const [chartRange, setChartRange] = useState<10 | 20 | 50>(10);
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -67,6 +70,12 @@ export default function StatsPage() {
           ])
         ).sort((a, b) => a.localeCompare(b, "ja"));
         setPlayers(playerNames);
+
+        if (playerNames.length > 0 && !selectedChartPlayer) {
+          setSelectedChartPlayer(
+            profile?.display_name ?? playerNames[0] ?? ""
+          );
+        }
 
         const entries = normalizeHistoryEntries(matches);
         setHistory(entries);
@@ -154,6 +163,16 @@ export default function StatsPage() {
     };
   }, [history, selectedOpponent, selectedSelf]);
 
+  const rankHistory = useMemo(
+    () => extractRankHistory(history, selectedChartPlayer, 50),
+    [history, selectedChartPlayer]
+  );
+
+  const displayedRanks = useMemo(
+    () => rankHistory.slice(-chartRange),
+    [rankHistory, chartRange]
+  );
+
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black text-zinc-400">
@@ -213,6 +232,80 @@ export default function StatsPage() {
                 </div>
               )}
             </>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
+          <h2 className="text-sm font-medium text-white mb-3">
+            順位履歴グラフ
+          </h2>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-zinc-400">プレイヤー</label>
+              <select
+                value={selectedChartPlayer}
+                onChange={(e) => setSelectedChartPlayer(e.target.value)}
+                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="">選択してください</option>
+                {players.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-zinc-400">表示期間</label>
+              <div className="flex gap-1">
+                {([10, 20, 50] as const).map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setChartRange(n)}
+                    className={`rounded px-3 py-2 text-sm ${
+                      chartRange === n
+                        ? "bg-zinc-500 text-white"
+                        : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                    }`}
+                  >
+                    直近{n}戦
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {selectedChartPlayer && displayedRanks.length > 0 ? (
+            <div className="rounded border border-zinc-600 bg-zinc-800/50 p-3 overflow-x-auto">
+              <div className="text-xs text-zinc-400 mb-2">
+                縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-max">
+                {[1, 2, 3, 4].map((rank) => (
+                  <div key={rank} className="flex items-center gap-1">
+                    <span className="w-6 text-xs text-zinc-500 shrink-0">
+                      {rank}位
+                    </span>
+                    <div className="flex gap-0.5">
+                      {displayedRanks.map((r, i) => (
+                        <div
+                          key={i}
+                          className={`h-4 w-3 rounded-sm shrink-0 ${
+                            r === rank
+                              ? "bg-amber-500"
+                              : "bg-zinc-700/50"
+                          }`}
+                          title={`${i + 1}戦目: ${r}位`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-400">
+              プレイヤーを選択すると、順位履歴が棒グラフで表示されます。
+            </p>
           )}
         </section>
 
