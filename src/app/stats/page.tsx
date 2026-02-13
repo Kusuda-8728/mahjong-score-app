@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  AggregatePlayerStats,
   HistoryEntry,
   PlayerKey,
   fetchMatches,
@@ -11,7 +10,8 @@ import {
   normalizeHistoryEntries,
   PLAYER_KEYS,
   buildAggregateStats,
-  extractRankHistory,
+  extractRankHistoryWithContext,
+  RankHistoryItem,
 } from "@/lib/mahjong-api";
 import { supabase } from "@/utils/supabase";
 
@@ -27,7 +27,6 @@ interface HeadToHeadStats {
 
 export default function StatsPage() {
   const [authChecked, setAuthChecked] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -36,6 +35,9 @@ export default function StatsPage() {
   const [selectedOpponent, setSelectedOpponent] = useState<string>("");
   const [selectedChartPlayer, setSelectedChartPlayer] = useState<string>("");
   const [chartRange, setChartRange] = useState<10 | 20 | 50>(10);
+  const [selectedDetail, setSelectedDetail] = useState<RankHistoryItem | null>(
+    null
+  );
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -49,7 +51,6 @@ export default function StatsPage() {
         return;
       }
       const userId = session.user.id;
-      setCurrentUser(userId);
       setAuthChecked(true);
       try {
         const [profile, fetchPlayersResult, matches] = await Promise.all([
@@ -71,9 +72,9 @@ export default function StatsPage() {
         ).sort((a, b) => a.localeCompare(b, "ja"));
         setPlayers(playerNames);
 
-        if (playerNames.length > 0 && !selectedChartPlayer) {
-          setSelectedChartPlayer(
-            profile?.display_name ?? playerNames[0] ?? ""
+        if (playerNames.length > 0) {
+          setSelectedChartPlayer((prev) =>
+            prev ? prev : profile?.display_name ?? playerNames[0] ?? ""
           );
         }
 
@@ -87,6 +88,8 @@ export default function StatsPage() {
       }
     };
     init();
+    // 初回ロード時のみ実行。selectedChartPlayer を deps に含めると
+    // ドロップダウン変更のたびに再フェッチしてしまうため除外。
   }, []);
 
   const aggregateStats = useMemo(
@@ -163,15 +166,34 @@ export default function StatsPage() {
     };
   }, [history, selectedOpponent, selectedSelf]);
 
-  const rankHistory = useMemo(
-    () => extractRankHistory(history, selectedChartPlayer, 50),
+  const rankHistoryWithContext = useMemo(
+    () => extractRankHistoryWithContext(history, selectedChartPlayer, 50),
     [history, selectedChartPlayer]
   );
 
-  const displayedRanks = useMemo(
-    () => rankHistory.slice(-chartRange),
-    [rankHistory, chartRange]
+  const displayedItems = useMemo(
+    () => rankHistoryWithContext.slice(-chartRange),
+    [rankHistoryWithContext, chartRange]
   );
+
+  const getRowDetail = (item: RankHistoryItem) => {
+    const row = item.entry.snapshot.rows?.[item.rowIndex];
+    const playerNames = item.entry.snapshot.playerNames;
+    if (!row?.ranks || !playerNames) return null;
+    const result: { rank: number; name: string; score: number; points: number }[] = [];
+    for (let r = 1; r <= 4; r++) {
+      const key = (PLAYER_KEYS as readonly PlayerKey[]).find(
+        (k) => row.ranks?.[k] === r
+      );
+      if (!key) continue;
+      const name = playerNames[key] ?? key;
+      const score = typeof row.scores?.[key] === "number" ? row.scores[key]! : 0;
+      const pts = row.points?.[key];
+      const points = typeof pts === "number" ? pts : 0;
+      result.push({ rank: r, name, score, points });
+    }
+    return result;
+  };
 
   if (!authChecked) {
     return (
@@ -274,10 +296,10 @@ export default function StatsPage() {
               </div>
             </div>
           </div>
-          {selectedChartPlayer && displayedRanks.length > 0 ? (
+          {selectedChartPlayer && displayedItems.length > 0 ? (
             <div className="rounded border border-zinc-600 bg-zinc-800/50 p-3 overflow-x-auto">
               <div className="text-xs text-zinc-400 mb-2">
-                縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近
+                縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近（クリックで詳細表示）
               </div>
               <div className="flex flex-col gap-0.5 min-w-max">
                 {[1, 2, 3, 4].map((rank) => (
@@ -286,15 +308,25 @@ export default function StatsPage() {
                       {rank}位
                     </span>
                     <div className="flex gap-0.5">
-                      {displayedRanks.map((r, i) => (
-                        <div
+                      {displayedItems.map((item, i) => (
+                        <button
                           key={i}
-                          className={`h-4 w-3 rounded-sm shrink-0 ${
-                            r === rank
-                              ? "bg-amber-500"
-                              : "bg-zinc-700/50"
+                          type="button"
+                          onClick={() =>
+                            item.rank === rank
+                              ? setSelectedDetail(item)
+                              : undefined
+                          }
+                          className={`h-4 w-3 rounded-sm shrink-0 transition-opacity ${
+                            item.rank === rank
+                              ? "bg-amber-500 hover:opacity-80 cursor-pointer"
+                              : "bg-zinc-700/50 cursor-default"
                           }`}
-                          title={`${i + 1}戦目: ${r}位`}
+                          title={
+                            item.rank === rank
+                              ? `${i + 1}戦目: ${item.rank}位（クリックで詳細）`
+                              : undefined
+                          }
                         />
                       ))}
                     </div>
@@ -306,6 +338,74 @@ export default function StatsPage() {
             <p className="text-xs text-zinc-400">
               プレイヤーを選択すると、順位履歴が棒グラフで表示されます。
             </p>
+          )}
+
+          {selectedDetail && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/60 z-40"
+                onClick={() => setSelectedDetail(null)}
+                aria-hidden="true"
+              />
+              <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+                <div
+                  className="rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl max-w-sm w-full p-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-white">
+                      対局詳細
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDetail(null)}
+                      className="text-zinc-400 hover:text-white"
+                      aria-label="閉じる"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-300 mb-3">
+                    {(() => {
+                      const raw =
+                        selectedDetail.entry.snapshot.gameDate ??
+                        selectedDetail.entry.date;
+                      try {
+                        const d = new Date(raw);
+                        return Number.isNaN(d.getTime())
+                          ? raw
+                          : d.toLocaleDateString("ja-JP", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            });
+                      } catch {
+                        return raw;
+                      }
+                    })()}
+                  </p>
+                  <div className="space-y-2 text-xs">
+                    {getRowDetail(selectedDetail)?.map((p) => (
+                      <div
+                        key={p.rank}
+                        className="flex justify-between items-center py-1 border-b border-zinc-700"
+                      >
+                        <span className="text-zinc-400 w-8">
+                          {p.rank}位
+                        </span>
+                        <span className="text-zinc-100 flex-1 truncate mx-2">
+                          {p.name}
+                        </span>
+                        <span className="text-zinc-300 shrink-0">
+                          スコア {p.score.toLocaleString()} / {p.points > 0 ? "+" : ""}
+                          {p.points}pt
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </section>
 

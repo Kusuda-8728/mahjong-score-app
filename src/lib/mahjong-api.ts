@@ -331,10 +331,30 @@ export function extractRankHistory(
   playerName: string,
   maxGames: number = 50
 ): number[] {
+  return extractRankHistoryWithContext(source, playerName, maxGames).map(
+    (item) => item.rank
+  );
+}
+
+export interface RankHistoryItem {
+  rank: number;
+  entry: HistoryEntry;
+  rowIndex: number;
+}
+
+/**
+ * 指定プレイヤーの順位履歴をコンテキスト付きで抽出（直近 maxGames 戦）。
+ * クリック時にその局の詳細を表示するために利用。
+ */
+export function extractRankHistoryWithContext(
+  source: HistoryEntry[],
+  playerName: string,
+  maxGames: number = 50
+): RankHistoryItem[] {
   const normalized = String(playerName).trim();
   if (!normalized) return [];
 
-  const all: number[] = [];
+  const all: RankHistoryItem[] = [];
   const sorted = [...source].sort(
     (a, b) =>
       new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
@@ -349,10 +369,11 @@ export function extractRankHistory(
     );
     if (!playerKey) continue;
 
-    for (const row of snap.rows) {
+    for (let rowIndex = 0; rowIndex < snap.rows.length; rowIndex++) {
+      const row = snap.rows[rowIndex];
       const rank = row.ranks?.[playerKey];
       if (typeof rank === "number" && rank >= 1 && rank <= 4) {
-        all.push(rank);
+        all.push({ rank, entry, rowIndex });
       }
     }
   }
