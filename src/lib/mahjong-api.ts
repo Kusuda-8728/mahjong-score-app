@@ -5,7 +5,24 @@ export type PlayerKey = "A" | "B" | "C" | "D";
 export interface UserProfile {
   user_id: string;
   display_name: string;
+  friend_code?: string | null;
   created_at?: string;
+}
+
+export interface FriendRow {
+  id: string;
+  user_id: string;
+  friend_id: string;
+  status: "pending" | "accepted";
+  created_at: string;
+}
+
+export interface FriendWithProfile {
+  id: string;
+  friend_id: string;
+  display_name: string;
+  status: "pending" | "accepted";
+  isIncoming: boolean;
 }
 
 export interface PlayerRecord {
@@ -69,6 +86,8 @@ export interface HistoryEntry {
   players: Record<PlayerKey, string>;
   topPlayer: PlayerKey;
   snapshot: SnapshotData;
+  /** 共有された対局かどうか */
+  isShared?: boolean;
 }
 
 export interface AggregatePlayerStats {
@@ -115,7 +134,7 @@ export const VALID_TOTALS = [100000, 120000] as const;
 export async function fetchUserProfile(userId: string) {
   const { data, error } = await supabase
     .from("user_profiles")
-    .select("user_id, display_name, created_at")
+    .select("user_id, display_name, friend_code, created_at")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -126,7 +145,7 @@ export async function upsertUserProfile(userId: string, displayName: string) {
   const { data, error } = await supabase
     .from("user_profiles")
     .upsert({ user_id: userId, display_name: displayName }, { onConflict: "user_id" })
-    .select("user_id, display_name, created_at")
+    .select("user_id, display_name, friend_code, created_at")
     .single();
   if (error) throw error;
   return data as UserProfile;
@@ -154,17 +173,138 @@ export async function insertPlayer(name: string, userId: string) {
   if (error) throw error;
 }
 
-export async function fetchMatches(userId: string) {
-  const { data, error } = await supabase
-    .from("matches")
-    .select("*")
-    .eq("user_id", userId)
-    .order("game_date", { ascending: false });
+/** フレンドコードでユーザーを検索（RPC） */
+export async function getProfileByFriendCode(
+  code: string
+): Promise<{ user_id: string; display_name: string } | null> {
+  const trimmed = String(code).trim().toUpperCase();
+  if (!trimmed) return null;
+  const { data, error } = await supabase.rpc("get_user_by_friend_code", {
+    code: trimmed,
+  });
   if (error) throw error;
-  return (data ?? []) as MatchRow[];
+  const row = Array.isArray(data) && data[0] ? data[0] : null;
+  return row as { user_id: string; display_name: string } | null;
 }
 
-export function normalizeHistoryEntries(matches: MatchRow[]): HistoryEntry[] {
+/** フレンド一覧・申請中・申請受信を取得 */
+export async function fetchFriends(userId: string): Promise<FriendWithProfile[]> {
+  const { data: rows, error } = await supabase
+    .from("friends")
+    .select("id, user_id, friend_id, status")
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+  if (error) throw error;
+
+  const ids = new Set<string>();
+  (rows ?? []).forEach((r: FriendRow) => {
+    ids.add(r.user_id);
+    ids.add(r.friend_id);
+  });
+  ids.delete(userId);
+
+  if (ids.size === 0) {
+    return (rows ?? []).map((r: FriendRow) => ({
+      id: r.id,
+      friend_id: r.user_id === userId ? r.friend_id : r.user_id,
+      display_name: "—",
+      status: r.status,
+      isIncoming: r.friend_id === userId,
+    }));
+  }
+
+  const { data: profiles } = await supabase
+    .from("user_profiles")
+    .select("user_id, display_name")
+    .in("user_id", Array.from(ids));
+  const nameMap = new Map(
+    (profiles ?? []).map((p: { user_id: string; display_name: string }) => [p.user_id, p.display_name])
+  );
+
+  return (rows ?? []).map((r: FriendRow) => {
+    const otherId = r.user_id === userId ? r.friend_id : r.user_id;
+    return {
+      id: r.id,
+      friend_id: otherId,
+      display_name: nameMap.get(otherId) ?? "—",
+      status: r.status,
+      isIncoming: r.friend_id === userId,
+    };
+  });
+}
+
+/** フレンド申請を送信 */
+export async function sendFriendRequest(userId: string, targetUserId: string) {
+  if (userId === targetUserId) throw new Error("自分自身に申請できません");
+  const { error } = await supabase.from("friends").insert({
+    user_id: userId,
+    friend_id: targetUserId,
+    status: "pending",
+  });
+  if (error) throw error;
+}
+
+/** フレンド申請を承認 */
+export async function acceptFriendRequest(friendRowId: string, userId: string) {
+  const { error } = await supabase
+    .from("friends")
+    .update({ status: "accepted", updated_at: new Date().toISOString() })
+    .eq("id", friendRowId)
+    .eq("friend_id", userId)
+    .eq("status", "pending");
+  if (error) throw error;
+}
+
+/** フレンド関係を解除 */
+export async function removeFriend(friendRowId: string, userId: string) {
+  const { error } = await supabase
+    .from("friends")
+    .delete()
+    .eq("id", friendRowId)
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+  if (error) throw error;
+}
+
+/** 対局をフレンドに共有 */
+export async function shareMatchWithUser(
+  ownerId: string,
+  matchId: string,
+  sharedWithUserId: string
+) {
+  if (ownerId === sharedWithUserId) throw new Error("自分自身には共有できません");
+  const { error } = await supabase.from("shared_matches").insert({
+    match_id: matchId,
+    owner_id: ownerId,
+    shared_with_user_id: sharedWithUserId,
+  });
+  if (error) throw error;
+}
+
+/** 共有された対局ID一覧を取得 */
+export async function fetchSharedMatchIds(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("shared_matches")
+    .select("match_id")
+    .eq("shared_with_user_id", userId);
+  if (error) throw error;
+  return new Set((data ?? []).map((r: { match_id: string }) => r.match_id));
+}
+
+/** 自分が作成した対局＋共有された対局を取得（RLS でフィルタされる） */
+export async function fetchMatches(userId: string) {
+  const { data: matches, error } = await supabase
+    .from("matches")
+    .select("*")
+    .order("game_date", { ascending: false });
+  if (error) throw error;
+
+  const sharedIds = await fetchSharedMatchIds(userId);
+  return { matches: (matches ?? []) as MatchRow[], sharedIds };
+}
+
+export function normalizeHistoryEntries(
+  matches: MatchRow[],
+  sharedIds?: Set<string>
+): HistoryEntry[] {
   return matches.map((m) => {
     const players: Record<PlayerKey, string> = {
       A: (m.player_a ?? "A") || "A",
@@ -190,6 +330,7 @@ export function normalizeHistoryEntries(matches: MatchRow[]): HistoryEntry[] {
     const snap: SnapshotData = m.snapshot ?? {};
     return {
       id: m.id,
+      isShared: sharedIds?.has(m.id) ?? false,
       name,
       date: m.created_at,
       players,

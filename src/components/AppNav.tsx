@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/", label: "スコア表" },
   { href: "/profile", label: "プロフィール" },
+  { href: "/friends", label: "フレンド" },
   { href: "/stats", label: "対戦成績" },
 ];
 

@@ -19,6 +19,8 @@ import {
   fetchMatches,
   fetchPlayers,
   fetchUserProfile,
+  fetchFriends,
+  shareMatchWithUser,
   isChipType,
   isUmaType,
   normalizeHistoryEntries,
@@ -133,6 +135,10 @@ export default function Home() {
   const [oka, setOka] = useState<string>("0"); // オカ（pt単位、例: 20.0）
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareTargetMatch, setShareTargetMatch] = useState<HistoryEntry | null>(null);
+  const [shareFriends, setShareFriends] = useState<Awaited<ReturnType<typeof fetchFriends>>>([]);
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [backupText, setBackupText] = useState<string>("");
   const [showAggregateModal, setShowAggregateModal] = useState(false);
@@ -212,8 +218,8 @@ export default function Home() {
 
   const refreshHistory = async (userId: string) => {
     try {
-      const matches = await fetchMatches(userId);
-      setHistory(normalizeHistoryEntries(matches));
+      const { matches, sharedIds } = await fetchMatches(userId);
+      setHistory(normalizeHistoryEntries(matches, sharedIds));
     } catch (e) {
       console.error("load history failed", e);
     }
@@ -251,7 +257,7 @@ export default function Home() {
         console.error("load saved failed", e);
       }
       try {
-        const [profile, players, matches] = await Promise.all([
+        const [profile, players, matchResult] = await Promise.all([
           fetchUserProfile(session.user.id),
           fetchPlayers(session.user.id),
           fetchMatches(session.user.id),
@@ -262,7 +268,7 @@ export default function Home() {
           setUserProfile(null);
         }
         setPlayerRegistry(players);
-        setHistory(normalizeHistoryEntries(matches));
+        setHistory(normalizeHistoryEntries(matchResult.matches, matchResult.sharedIds));
       } catch (e) {
         console.error("initial data load failed", e);
       }
@@ -1056,25 +1062,53 @@ export default function Home() {
         {history.map((h) => (
           <div key={h.id} className="flex items-center justify-between border border-zinc-700 rounded px-3 py-2">
                     <div>
-                      <div className="text-sm text-zinc-200">{h.name}</div>
+                      <div className="flex items-center gap-1.5 text-sm text-zinc-200">
+                        {h.name}
+                        {h.isShared && (
+                          <span className="rounded bg-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                            共有
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-zinc-500">
                         対局日: {h.snapshot?.gameDate ? `${h.snapshot.gameDate.slice(0,4)}/${h.snapshot.gameDate.slice(5,7)}/${h.snapshot.gameDate.slice(8,10)}` : new Date(h.date).toLocaleDateString()} / 参加: {Object.values(h.players).join(', ')} / トップ: {h.players?.[h.topPlayer] ?? h.topPlayer}
                       </div>
                     </div>
                     <div className="flex gap-2">
               <button onClick={() => loadHistoryEntry(h.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
-                      <button onClick={async () => {
-                        if (!confirm('この履歴を削除しますか？')) return;
-                        try {
-                          const { error } = await supabase.from("matches").delete().eq("id", h.id);
-                          if (error) throw error;
-                          if (currentUser) {
-                            await refreshHistory(currentUser.id);
+                      {!h.isShared && (
+                        <button
+                          onClick={async () => {
+                            if (!currentUser) return;
+                            try {
+                              const list = await fetchFriends(currentUser.id);
+                              setShareTargetMatch(h);
+                              setShareFriends(list.filter((f) => f.status === "accepted"));
+                              setShareMessage(null);
+                              setShowShareModal(true);
+                            } catch (e) {
+                              alert("フレンド一覧の取得に失敗しました");
+                            }
+                          }}
+                          className="rounded bg-blue-600 px-2 py-1 text-xs"
+                        >
+                          共有
+                        </button>
+                      )}
+                      {!h.isShared && (
+                        <button onClick={async () => {
+                          if (!confirm('この履歴を削除しますか？')) return;
+                          try {
+                            const { error } = await supabase.from("matches").delete().eq("id", h.id);
+                            if (error) throw error;
+                            if (currentUser) {
+                              await refreshHistory(currentUser.id);
+                            }
+                          } catch (e) {
+                            alert("削除に失敗しました。\n" + (e instanceof Error ? e.message : String(e)));
                           }
-                        } catch (e) {
-                          alert("削除に失敗しました。\n" + (e instanceof Error ? e.message : String(e)));
-                        }
-                      }} className="rounded bg-red-700 px-2 py-1 text-xs">削除</button>
+                        }} className="rounded bg-red-700 px-2 py-1 text-xs">削除</button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1082,6 +1116,75 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* 共有モーダル */}
+        {showShareModal && shareTargetMatch && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="w-full max-w-md rounded-lg bg-zinc-900 border border-zinc-700 p-4 text-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-base font-medium text-white">
+                  共有: {shareTargetMatch.name}
+                </div>
+                <button
+                  className="text-xs text-zinc-300 hover:text-white"
+                  onClick={() => {
+                    setShowShareModal(false);
+                    setShareTargetMatch(null);
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+              {shareMessage && (
+                <div className="mb-3 rounded bg-zinc-800 px-3 py-2 text-xs text-amber-300">
+                  {shareMessage}
+                </div>
+              )}
+              {shareFriends.length === 0 ? (
+                <p className="text-xs text-zinc-500">
+                  フレンドがいません。
+                  <Link href="/friends" className="ml-1 text-emerald-400 hover:underline">
+                    フレンドページ
+                  </Link>
+                  で追加してください。
+                </p>
+              ) : (
+                <ul className="space-y-2 max-h-60 overflow-y-auto">
+                  {shareFriends.map((f) => (
+                    <li key={f.id}>
+                      <button
+                        onClick={async () => {
+                          if (!currentUser) return;
+                          try {
+                            await shareMatchWithUser(
+                              currentUser.id,
+                              shareTargetMatch.id,
+                              f.friend_id
+                            );
+                            setShareMessage(`${f.display_name} さんに共有しました`);
+                            setShowShareModal(false);
+                            setShareTargetMatch(null);
+                          } catch (e) {
+                            const err = e as Error;
+                            if (err.message?.includes("duplicate") || err.message?.includes("unique")) {
+                              setShareMessage("すでに共有済みです");
+                            } else {
+                              setShareMessage("共有に失敗しました");
+                            }
+                          }
+                        }}
+                        className="w-full rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-left text-sm text-zinc-100 hover:bg-zinc-700"
+                      >
+                        {f.display_name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 通算成績モーダル */ }
         {showAggregateModal && aggregateStats && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

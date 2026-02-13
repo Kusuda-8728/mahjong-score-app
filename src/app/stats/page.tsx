@@ -53,7 +53,7 @@ export default function StatsPage() {
       const userId = session.user.id;
       setAuthChecked(true);
       try {
-        const [profile, fetchPlayersResult, matches] = await Promise.all([
+        const [profile, fetchPlayersResult, matchResult] = await Promise.all([
           fetchUserProfile(userId),
           fetchPlayers(userId),
           fetchMatches(userId),
@@ -78,7 +78,7 @@ export default function StatsPage() {
           );
         }
 
-        const entries = normalizeHistoryEntries(matches);
+        const entries = normalizeHistoryEntries(matchResult.matches, matchResult.sharedIds);
         setHistory(entries);
       } catch (e) {
         console.error("load stats data failed", e);
