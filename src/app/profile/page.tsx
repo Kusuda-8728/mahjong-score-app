@@ -156,7 +156,7 @@ export default function ProfilePage() {
               type="text"
               value={profileInputName}
               onChange={(e) => setProfileInputName(e.target.value)}
-              placeholder="例: おおにし"
+              placeholder=""
               className="w-full sm:w-60 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
             />
             <button
@@ -198,7 +198,7 @@ export default function ProfilePage() {
               type="text"
               value={newPlayerName}
               onChange={(e) => setNewPlayerName(e.target.value)}
-              placeholder="例: かとう"
+              placeholder=""
               className="w-full sm:w-60 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
             />
             <button
