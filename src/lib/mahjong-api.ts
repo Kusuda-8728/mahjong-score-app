@@ -14,7 +14,7 @@ export interface FriendRow {
   user_id: string;
   friend_id: string;
   status: "pending" | "accepted";
-  created_at: string;
+  created_at?: string;
 }
 
 export interface FriendWithProfile {
