@@ -1431,49 +1431,51 @@ export default function Home() {
           </div>
         </section>
 
-        {/* バックアップ・インポート・結果コピー（アプリ最下部） */}
-        <div className="mt-8 flex flex-wrap gap-3 pb-8">
-          <button
-            onClick={exportHistoryBackup}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          >
-            バックアップ表示
-          </button>
-          <button
-            onClick={() => { setBackupText(""); setShowBackupModal(true); }}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          >
-            インポート
-          </button>
-          <button
-            onClick={() => {
-              const lastCompletedIndex = rows.map((r) =>
-                players.every((p) => typeof r.points[p] === "number")
-              ).lastIndexOf(true);
-              const totals = chipValuePerPoint > 0 ? totalWithChips : totalScores;
-              const dateStr = gameDate ? `${gameDate.slice(0,4)}/${gameDate.slice(5,7)}/${gameDate.slice(8,10)}` : '';
-              const lines: string[] = [];
-              lines.push(`【対局結果】${dateStr}`);
-              const order = [...players].sort((a,b)=> totals[b]-totals[a]);
-              order.forEach((p, idx) => {
-                const place = idx+1;
-                const name = playerNames[p] || p;
-                const val = totals[p] > 0 ? `+${totals[p]}` : `${totals[p]}`;
-                let tob = '';
-                if (lastCompletedIndex >= 0) {
-                  const r = rows[lastCompletedIndex];
-                  if (r.ranks && r.ranks[p] === 4) tob = ' (飛)';
-                }
-                lines.push(`${place}位: ${name} ${val}${tob}`);
-              });
-              const text = lines.join('\n');
-              navigator.clipboard?.writeText(text).then(()=> alert('結果をコピーしました'));
-            }}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          >
-            結果をコピー
-          </button>
-        </div>
+        {/* バックアップ・インポート・結果コピー（アプリ最下部・管理者のみ表示） */}
+        {currentUser?.email === "toshi_k0728@yahoo.co.jp" && (
+          <div className="mt-8 flex flex-wrap gap-3 pb-8">
+            <button
+              onClick={exportHistoryBackup}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+            >
+              バックアップ表示
+            </button>
+            <button
+              onClick={() => { setBackupText(""); setShowBackupModal(true); }}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+            >
+              インポート
+            </button>
+            <button
+              onClick={() => {
+                const lastCompletedIndex = rows.map((r) =>
+                  players.every((p) => typeof r.points[p] === "number")
+                ).lastIndexOf(true);
+                const totals = chipValuePerPoint > 0 ? totalWithChips : totalScores;
+                const dateStr = gameDate ? `${gameDate.slice(0,4)}/${gameDate.slice(5,7)}/${gameDate.slice(8,10)}` : '';
+                const lines: string[] = [];
+                lines.push(`【対局結果】${dateStr}`);
+                const order = [...players].sort((a,b)=> totals[b]-totals[a]);
+                order.forEach((p, idx) => {
+                  const place = idx+1;
+                  const name = playerNames[p] || p;
+                  const val = totals[p] > 0 ? `+${totals[p]}` : `${totals[p]}`;
+                  let tob = '';
+                  if (lastCompletedIndex >= 0) {
+                    const r = rows[lastCompletedIndex];
+                    if (r.ranks && r.ranks[p] === 4) tob = ' (飛)';
+                  }
+                  lines.push(`${place}位: ${name} ${val}${tob}`);
+                });
+                const text = lines.join('\n');
+                navigator.clipboard?.writeText(text).then(()=> alert('結果をコピーしました'));
+              }}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+            >
+              結果をコピー
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );

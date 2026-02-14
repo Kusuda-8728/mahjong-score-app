@@ -25,6 +25,87 @@ interface HeadToHeadStats {
   avgRankOpponent: number | null;
 }
 
+function SearchableSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  className,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  placeholder: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const filtered = useMemo(() => {
+    if (!search.trim()) return options;
+    const q = search.trim().toLowerCase();
+    return options.filter((p) => p.toLowerCase().includes(q));
+  }, [options, search]);
+
+  useEffect(() => {
+    const fn = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, []);
+
+  return (
+    <div className={`relative ${className ?? ""}`} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-left text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+      >
+        {value || placeholder}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded border border-zinc-600 bg-zinc-900 shadow-xl">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="検索..."
+            className="m-2 w-[calc(100%-1rem)] rounded border border-zinc-600 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none"
+          />
+          <div className="max-h-40 overflow-y-auto p-1">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className="w-full rounded px-2 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-800"
+            >
+              {placeholder}
+            </button>
+            {filtered.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => {
+                  onChange(p);
+                  setOpen(false);
+                }}
+                className={`w-full rounded px-2 py-1.5 text-left text-sm hover:bg-zinc-800 ${
+                  value === p ? "text-emerald-300" : "text-zinc-100"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StatsPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
@@ -399,18 +480,13 @@ export default function StatsPage() {
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">プレイヤー</label>
-              <select
+              <SearchableSelect
                 value={selectedChartPlayer}
-                onChange={(e) => setSelectedChartPlayer(e.target.value)}
-                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-              >
-                <option value="">選択してください</option>
-                {players.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
+                options={players}
+                onChange={setSelectedChartPlayer}
+                placeholder="選択してください"
+                className="w-48"
+              />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">表示期間</label>
@@ -432,75 +508,62 @@ export default function StatsPage() {
             </div>
           </div>
           {selectedChartPlayer && displayedItems.length > 0 ? (
-            <div className="rounded border border-zinc-600 bg-zinc-800/50 p-3 overflow-x-auto">
-              <div className="text-xs text-zinc-400 mb-2">
-                縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近（クリックで詳細表示）
-              </div>
-              <div className="flex flex-col gap-0.5 min-w-max">
-                {[1, 2, 3, 4].map((rank) => (
-                  <div key={rank} className="flex items-center gap-1">
-                    <span className="w-6 text-xs text-zinc-500 shrink-0">
-                      {rank}位
-                    </span>
-                    <div className="flex gap-0.5">
-                      {displayedItems.map((item, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() =>
-                            item.rank === rank
-                              ? setSelectedDetail(item)
-                              : undefined
-                          }
-                          className={`h-4 w-3 rounded-sm shrink-0 transition-opacity ${
-                            item.rank === rank
-                              ? "bg-amber-500 hover:opacity-80 cursor-pointer"
-                              : "bg-zinc-700/50 cursor-default"
-                          }`}
-                          title={
-                            item.rank === rank
-                              ? `${i + 1}戦目: ${item.rank}位（クリックで詳細）`
-                              : undefined
-                          }
-                        />
-                      ))}
+            <div
+              className="rounded border border-zinc-600 bg-zinc-800/50 p-3 overflow-x-auto flex flex-col md:flex-row gap-4"
+              onMouseLeave={() => setSelectedDetail(null)}
+            >
+              <div className="min-w-0">
+                <div className="text-xs text-zinc-400 mb-2">
+                  縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近（ホバーで詳細表示）
+                </div>
+                <div className="flex flex-col gap-0.5 min-w-max">
+                  {[1, 2, 3, 4].map((rank) => (
+                    <div key={rank} className="flex items-center gap-1">
+                      <span className="w-6 text-xs text-zinc-500 shrink-0">
+                        {rank}位
+                      </span>
+                      <div className="flex gap-0.5">
+                        {displayedItems.map((item, i) => {
+                          const isRankCell = item.rank === rank;
+                          const isDisplaying =
+                            selectedDetail === item && isRankCell;
+                          return (
+                            <div
+                              key={i}
+                              role="button"
+                              tabIndex={0}
+                              onMouseEnter={() =>
+                                isRankCell ? setSelectedDetail(item) : undefined
+                              }
+                              onFocus={() =>
+                                isRankCell ? setSelectedDetail(item) : undefined
+                              }
+                              className={`h-4 w-3 rounded-sm shrink-0 transition-colors ${
+                                isRankCell
+                                  ? isDisplaying
+                                    ? "bg-amber-300 ring-1 ring-amber-200"
+                                    : "bg-amber-500 hover:bg-amber-400 cursor-pointer"
+                                  : "bg-zinc-700/50"
+                              }`}
+                              title={
+                                isRankCell
+                                  ? `${i + 1}戦目: ${item.rank}位`
+                                  : undefined
+                              }
+                            />
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            <p className="text-xs text-zinc-400">
-              プレイヤーを選択すると、順位履歴が棒グラフで表示されます。
-            </p>
-          )}
-
-          {selectedDetail && (
-            <>
-              <div
-                className="fixed inset-0 bg-black/60 z-40"
-                onClick={() => setSelectedDetail(null)}
-                aria-hidden="true"
-              />
-              <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
-                <div
-                  className="rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl max-w-sm w-full p-4"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-medium text-white">
-                      対局詳細
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDetail(null)}
-                      className="text-zinc-400 hover:text-white"
-                      aria-label="閉じる"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <p className="text-xs text-zinc-300 mb-3">
+              {selectedDetail && (
+                <div className="flex-shrink-0 w-full md:w-64 rounded-lg border border-zinc-600 bg-zinc-900 p-3 text-xs">
+                  <h3 className="text-sm font-medium text-white mb-2">
+                    対局詳細
+                  </h3>
+                  <p className="text-zinc-300 mb-2">
                     {(() => {
                       const raw =
                         selectedDetail.entry.snapshot.gameDate ??
@@ -519,29 +582,33 @@ export default function StatsPage() {
                       }
                     })()}
                   </p>
-                  <div className="space-y-2 text-xs">
+                  <div className="space-y-1.5">
                     {getRowDetail(selectedDetail)?.map((p) => (
                       <div
                         key={p.rank}
                         className="flex justify-between items-center py-1 border-b border-zinc-700"
                       >
-                        <span className="text-zinc-400 w-8">
-                          {p.rank}位
-                        </span>
+                        <span className="text-zinc-400 w-8">{p.rank}位</span>
                         <span className="text-zinc-100 flex-1 truncate mx-2">
                           {p.name}
                         </span>
                         <span className="text-zinc-300 shrink-0">
-                          スコア {p.score.toLocaleString()} / {p.points > 0 ? "+" : ""}
+                          スコア {p.score.toLocaleString()} /{" "}
+                          {p.points > 0 ? "+" : ""}
                           {p.points}pt
                         </span>
                       </div>
                     ))}
                   </div>
                 </div>
-              </div>
-            </>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-400">
+              プレイヤーを選択すると、順位履歴が棒グラフで表示されます。
+            </p>
           )}
+
         </section>
 
         <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
@@ -549,38 +616,30 @@ export default function StatsPage() {
           <div className="mt-3 flex flex-col gap-3 md:flex-row">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">自分</label>
-              <select
+              <SearchableSelect
                 value={selectedSelf}
-                onChange={(e) => setSelectedSelf(e.target.value)}
-                className="w-48 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-              >
-                <option value="">選択してください</option>
-                {userDisplayName && (
-                  <option value={userDisplayName}>{userDisplayName}</option>
-                )}
-                {players
-                  .filter((p) => p !== userDisplayName)
-                  .map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-              </select>
+                options={
+                  userDisplayName
+                    ? [
+                        userDisplayName,
+                        ...players.filter((p) => p !== userDisplayName),
+                      ]
+                    : players
+                }
+                onChange={setSelectedSelf}
+                placeholder="選択してください"
+                className="w-48"
+              />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">対戦相手</label>
-              <select
+              <SearchableSelect
                 value={selectedOpponent}
-                onChange={(e) => setSelectedOpponent(e.target.value)}
-                className="w-48 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-              >
-                <option value="">選択してください</option>
-                {players.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
+                options={players}
+                onChange={setSelectedOpponent}
+                placeholder="選択してください"
+                className="w-48"
+              />
             </div>
           </div>
           {headToHeadStats ? (
