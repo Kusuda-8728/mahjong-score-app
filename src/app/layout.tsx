@@ -56,10 +56,7 @@ export default function RootLayout({
       <head>
         <meta
           name="google-site-verification"
-          content={
-            process.env.GOOGLE_SITE_VERIFICATION ||
-            "vUpt_W1Svd180KF8JO-XACVF8z2GqH2Z2oPs1Sv_Pc8"
-          }
+          content="vUpt_WlSvdl8OKF8JO-XACVF8z2GqH2Z2oPs1Sv_Pc8"
         />
         <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
         <meta httpEquiv="Pragma" content="no-cache" />
