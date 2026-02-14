@@ -914,12 +914,12 @@ export default function Home() {
           <table className="min-w-full border-collapse text-xs">
             <thead>
               <tr>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1">
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-[6px]">
                   <span className="sr-only">局数</span>
                 </th>
-                <th className="border border-zinc-600 bg-zinc-900 px-1 py-1 w-14">飛賞</th>
+                <th className="border border-zinc-600 bg-zinc-900 px-1 py-[6px] w-12">飛賞</th>
                 {players.map((p, idx) => (
-                  <th key={p} className={`border border-zinc-600 bg-zinc-900 px-1 py-1 text-center font-bold ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
+                  <th key={p} className={`border border-zinc-600 bg-zinc-900 px-1 py-[6px] text-center font-bold ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
                     <div className="flex flex-col items-center gap-0.5">
                       <span>{p}</span>
                       <span className="max-w-[56px] truncate text-[10px] text-zinc-300 leading-tight">
@@ -942,16 +942,16 @@ export default function Home() {
                 return (
                   <Fragment key={i}>
                     <tr>
-                      <td className="border border-zinc-600 px-1.5 py-1 align-top" rowSpan={2}>{i + 1}</td>
-                      <td className="border border-zinc-600 px-1.5 py-1 align-top w-14" rowSpan={2}>
+                      <td className="border border-zinc-600 px-1.5 py-[6px] align-top" rowSpan={2}>{i + 1}</td>
+                      <td className="border border-zinc-600 px-0.5 py-[6px] align-top w-12 min-w-[2.5rem]" rowSpan={2}>
                         <div className={`text-xs ${tobiMissing ? "font-semibold text-red-400" : ""}`}>
                           {tobiMissing ? "✖" : checkIcon}
                         </div>
-                        <div className="mt-1">
+                        <div className="mt-1 min-w-0">
                           <select
                             value={row.tobiPlayer}
                             onChange={(e) => updateTobiPlayer(i, e.target.value as PlayerKey | '')}
-                            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-xs text-zinc-100"
+                            className="min-w-0 w-full max-w-full rounded border border-zinc-700 bg-zinc-800 pl-0.5 pr-1 py-0.5 text-xs text-zinc-100"
                           >
                             <option value="">-</option>
                             <option value="A">A</option>
@@ -962,7 +962,7 @@ export default function Home() {
                         </div>
                       </td>
                       {players.map((p, idx) => (
-                        <td key={p} className={`border border-zinc-600 px-1 py-0.5 text-center ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
+                        <td key={p} className={`border border-zinc-600 px-1 py-[6px] text-center ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
                           <input
                             type="number"
                             value={row.points[p] === "" ? "" : String(row.points[p])}
@@ -976,19 +976,19 @@ export default function Home() {
                       {players.map((p, idx) => {
                         const shouldShowScore = check === "OK" && !tobiMissing;
                         return (
-                          <td key={p} className={`border border-zinc-600 px-1.5 py-1 font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
+                          <td key={p} className={`border border-zinc-600 px-1.5 py-[6px] font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-4 shrink-0 text-left text-[11px] ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
+                              <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
                                 {shouldShowScore ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
                               </span>
                               <span className="flex-1 text-center">
                                 {shouldShowScore ? (() => {
                                   const sc = rows[i].scores[p];
-                                  if (sc === 0) return <span className="text-[11px] text-zinc-500">-</span>;
+                                  if (sc === 0) return <span className="text-xs text-zinc-500">-</span>;
                                   const positive = sc > 0;
                                   const text = positive ? "text-blue-300" : "text-red-400";
-                                  return <span className={`${text} text-[11px]`}>{positive ? `+${sc}` : sc}</span>;
-                                })() : <span className="text-[11px] text-zinc-500">-</span>}
+                                  return <span className={`${text} text-xs`}>{positive ? `+${sc}` : sc}</span>;
+                                })() : <span className="text-xs text-zinc-500">-</span>}
                               </span>
                             </div>
                           </td>
@@ -999,12 +999,12 @@ export default function Home() {
                 );
               })}
               <tr className="bg-zinc-800 font-medium">
-                <td className="border border-zinc-600 px-1 py-1">計</td>
-                <td className="border border-zinc-600 px-1 py-1">-</td>
+                <td className="border border-zinc-600 px-1 py-[6px]">計</td>
+                <td className="border border-zinc-600 px-1 py-[6px]">-</td>
                 {players.map((p, idx) => {
                   const stat = playerStats.find((s) => s.player === p);
                   return (
-                    <td key={p} className={`border border-zinc-600 px-1 py-1 text-center ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
+                    <td key={p} className={`border border-zinc-600 px-1 py-[6px] text-center ${idx < players.length - 1 ? 'border-r-4 border-black' : ''}`}>
                       <div className="text-xs text-zinc-400">{stat && stat.games ? stat.avgRank.toFixed(2) : '-'}</div>
                       <div className="text-sm tabular-nums">{totalScores[p] > 0 ? `+${Math.round(totalScores[p] * 10) / 10}` : Math.round(totalScores[p] * 10) / 10}</div>
                     </td>

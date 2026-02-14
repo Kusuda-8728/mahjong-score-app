@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   HistoryEntry,
   PlayerKey,
@@ -38,6 +38,12 @@ export default function StatsPage() {
   const [selectedDetail, setSelectedDetail] = useState<RankHistoryItem | null>(
     null
   );
+  const [statsPlayerFilter, setStatsPlayerFilter] = useState<Set<string>>(
+    new Set()
+  );
+  const [statsFilterOpen, setStatsFilterOpen] = useState(false);
+  const [statsFilterSearch, setStatsFilterSearch] = useState("");
+  const statsFilterRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -95,6 +101,71 @@ export default function StatsPage() {
   const aggregateStats = useMemo(
     () => buildAggregateStats(history),
     [history]
+  );
+
+  const statsPlayerNames = useMemo(
+    () =>
+      Object.values(aggregateStats)
+        .map((s) => s.name)
+        .sort((a, b) => a.localeCompare(b, "ja")),
+    [aggregateStats]
+  );
+
+  const hasInitializedStatsFilter = useRef(false);
+  useEffect(() => {
+    if (
+      statsPlayerNames.length > 0 &&
+      !hasInitializedStatsFilter.current
+    ) {
+      setStatsPlayerFilter(new Set(statsPlayerNames));
+      hasInitializedStatsFilter.current = true;
+    }
+  }, [statsPlayerNames]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        statsFilterRef.current &&
+        !statsFilterRef.current.contains(e.target as Node)
+      ) {
+        setStatsFilterOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredStatsPlayerNames = useMemo(() => {
+    if (!statsFilterSearch.trim())
+      return statsPlayerNames;
+    const q = statsFilterSearch.trim().toLowerCase();
+    return statsPlayerNames.filter((n) =>
+      n.toLowerCase().includes(q)
+    );
+  }, [statsPlayerNames, statsFilterSearch]);
+
+  const toggleStatsPlayer = (name: string) => {
+    setStatsPlayerFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleAllStatsPlayers = () => {
+    const allSelected =
+      statsPlayerNames.length > 0 &&
+      statsPlayerNames.every((n) => statsPlayerFilter.has(n));
+    setStatsPlayerFilter(allSelected ? new Set() : new Set(statsPlayerNames));
+  };
+
+  const displayedStats = useMemo(
+    () =>
+      Object.values(aggregateStats)
+        .filter((s) => statsPlayerFilter.has(s.name))
+        .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+    [aggregateStats, statsPlayerFilter]
   );
 
   const headToHeadStats = useMemo((): HeadToHeadStats | null => {
@@ -207,9 +278,71 @@ export default function StatsPage() {
     <div className="min-h-screen bg-black text-zinc-100 font-sans">
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
         <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
-          <h1 className="text-lg font-semibold text-white mb-2">
-            通算成績
-          </h1>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <h1 className="text-lg font-semibold text-white">
+              通算成績
+            </h1>
+            {statsPlayerNames.length > 0 && (
+              <div className="relative" ref={statsFilterRef}>
+                <button
+                  type="button"
+                  onClick={() => setStatsFilterOpen((o) => !o)}
+                  className="flex items-center gap-2 rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-700"
+                >
+                  <span>プレイヤー絞り込み</span>
+                  <span className="text-xs text-zinc-400">
+                    {statsPlayerFilter.size}件選択
+                  </span>
+                  <span className="text-zinc-500">
+                    {statsFilterOpen ? "▼" : "▶"}
+                  </span>
+                </button>
+                {statsFilterOpen && (
+                  <div className="absolute left-0 top-full z-20 mt-1 min-w-[200px] rounded border border-zinc-600 bg-zinc-900 shadow-xl">
+                    <div className="border-b border-zinc-700 p-2">
+                      <input
+                        type="text"
+                        value={statsFilterSearch}
+                        onChange={(e) => setStatsFilterSearch(e.target.value)}
+                        placeholder="検索..."
+                        className="w-full rounded border border-zinc-600 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto p-1">
+                      <button
+                        type="button"
+                        onClick={toggleAllStatsPlayers}
+                        className="mb-1 w-full rounded px-2 py-1 text-left text-xs text-zinc-400 hover:bg-zinc-800"
+                      >
+                        {statsPlayerNames.every((n) => statsPlayerFilter.has(n))
+                          ? "全て解除"
+                          : "全て選択"}
+                      </button>
+                      {filteredStatsPlayerNames.map((name) => (
+                        <label
+                          key={name}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-zinc-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={statsPlayerFilter.has(name)}
+                            onChange={() => toggleStatsPlayer(name)}
+                            className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span className="text-sm text-zinc-100">{name}</span>
+                        </label>
+                      ))}
+                      {filteredStatsPlayerNames.length === 0 && (
+                        <p className="px-2 py-2 text-xs text-zinc-500">
+                          該当なし
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {loading ? (
             <p className="text-xs text-zinc-400">読み込み中...</p>
           ) : (
@@ -218,11 +351,13 @@ export default function StatsPage() {
                 <p className="text-xs text-zinc-400">
                   まだ対局データがありません。
                 </p>
+              ) : displayedStats.length === 0 ? (
+                <p className="text-xs text-zinc-400">
+                  表示するプレイヤーを選択してください。
+                </p>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {Object.values(aggregateStats)
-                    .sort((a, b) => a.name.localeCompare(b.name, "ja"))
-                    .map((stat) => (
+                  {displayedStats.map((stat) => (
                       <div
                         key={stat.name}
                         className="rounded border border-zinc-700 bg-zinc-800/70 p-3 text-xs text-zinc-100"
