@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "@/utils/supabase";
 
@@ -139,6 +140,13 @@ export function AppFooter() {
       <footer className="border-t border-zinc-800 bg-zinc-950/80 py-4">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 sm:px-6">
           <div className="flex flex-wrap justify-center gap-4 text-xs">
+            <Link
+              href="/lp"
+              className="text-zinc-400 hover:text-zinc-200 underline"
+            >
+              アプリについて
+            </Link>
+            <span className="text-zinc-600">|</span>
             <button
               type="button"
               onClick={() => setTermsOpen(true)}
