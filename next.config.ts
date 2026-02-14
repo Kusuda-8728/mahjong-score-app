@@ -6,6 +6,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/googlefe385d59b81f7520.html",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=3600",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           {
