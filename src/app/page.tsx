@@ -1431,9 +1431,28 @@ export default function Home() {
           </div>
         </section>
 
-        {/* バックアップ・インポート・結果コピー（アプリ最下部・管理者のみ表示） */}
+        {/* バックアップ・インポート・結果コピー・全データ削除（アプリ最下部・管理者のみ表示） */}
         {currentUser?.email === "toshi_k0728@yahoo.co.jp" && (
           <div className="mt-8 flex flex-wrap gap-3 pb-8">
+            <button
+              onClick={async () => {
+                if (!confirm("全ての対局履歴を削除します。よろしいですか？")) return;
+                if (!currentUser) return;
+                try {
+                  const { error } = await supabase.from("matches").delete().eq("user_id", currentUser.id);
+                  if (error) throw error;
+                  setHistory([]);
+                  await refreshHistory(currentUser.id);
+                  alert("全ての対局履歴を削除しました。");
+                } catch (e) {
+                  console.error("delete failed", e);
+                  alert("削除に失敗しました。");
+                }
+              }}
+              className="rounded border border-red-600/60 bg-red-900/30 px-3 py-2 text-sm text-red-300 hover:bg-red-900/50"
+            >
+              全データ削除
+            </button>
             <button
               onClick={exportHistoryBackup}
               className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
