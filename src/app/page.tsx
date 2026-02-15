@@ -1,12 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase";
 import type { User } from "@supabase/supabase-js";
 import {
-  AggregatePlayerStats,
   ChipTypeOption,
   HistoryEntry,
   PlayerKey,
@@ -15,7 +14,6 @@ import {
   SnapshotRowData,
   UMA_PRESETS,
   UmaTypeOption,
-  buildAggregateStats,
   fetchMatches,
   fetchPlayers,
   fetchUserProfile,
@@ -114,25 +112,100 @@ const initialRow: RowData = {
   scores: { A: 0, B: 0, C: 0, D: 0 },
   tobiPlayer: "",
 };
+
+const DRAFT_KEY = "mahjong_saved";
+
+function loadDraft(): {
+  rows?: RowData[];
+  playerNames?: Record<PlayerKey, string>;
+  umaType?: string;
+  customUma?: string[];
+  tobiBonus?: string | number;
+  oka?: string | number;
+  chipValueType?: string;
+  chipCustomValue?: string | number;
+  gameDate?: string;
+  chipTotals?: Record<PlayerKey, number | "" | "-">;
+  editingMatchId?: string | null;
+} | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+const defaultRows: RowData[] = [
+  {
+    ...initialRow,
+    points: { A: "", B: "", C: "", D: "" },
+    ranks: { A: 0, B: 0, C: 0, D: 0 },
+    scores: { A: 0, B: 0, C: 0, D: 0 },
+    tobiPlayer: "",
+  },
+];
+
 export default function Home() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  const [rows, setRows] = useState<RowData[]>([
-    {
-      ...initialRow,
-      points: { A: "", B: "", C: "", D: "" },
-      ranks: { A: 0, B: 0, C: 0, D: 0 },
-      scores: { A: 0, B: 0, C: 0, D: 0 },
-      tobiPlayer: "",
-    },
-  ]);
+  const [initialDraft] = useState(() => loadDraft());
+  const draft = initialDraft;
+
+  const [rows, setRows] = useState<RowData[]>(() => {
+    const r = draft?.rows;
+    if (!Array.isArray(r) || r.length === 0) return defaultRows;
+    return r.map((row) => ({
+      points: {
+        A: row.points?.A ?? "",
+        B: row.points?.B ?? "",
+        C: row.points?.C ?? "",
+        D: row.points?.D ?? "",
+      },
+      ranks: {
+        A: row.ranks?.A ?? 0,
+        B: row.ranks?.B ?? 0,
+        C: row.ranks?.C ?? 0,
+        D: row.ranks?.D ?? 0,
+      },
+      scores: {
+        A: row.scores?.A ?? 0,
+        B: row.scores?.B ?? 0,
+        C: row.scores?.C ?? 0,
+        D: row.scores?.D ?? 0,
+      },
+      tobiPlayer: (row.tobiPlayer ?? "") as PlayerKey | "",
+    }));
+  });
 
   const [chipTotals, setChipTotals] = useState<
     Record<PlayerKey, number | "" | "-">
-  >({ A: "", B: "", C: "", D: "" });
-  const [oka, setOka] = useState<string>("0"); // オカ（pt単位、例: 20.0）
+  >(() => {
+    const ct = draft?.chipTotals;
+    if (!ct || typeof ct !== "object") return { A: "", B: "", C: "", D: "" };
+    const norm = (v: unknown): number | "" | "-" => {
+      if (v === "" || v === "-") return v;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      const s = String(v).trim();
+      if (s === "" || s === "-") return s as "" | "-";
+      const n = Number(s);
+      return Number.isFinite(n) ? n : "";
+    };
+    return {
+      A: norm(ct.A ?? ""),
+      B: norm(ct.B ?? ""),
+      C: norm(ct.C ?? ""),
+      D: norm(ct.D ?? ""),
+    };
+  });
+  const [oka, setOka] = useState<string>(() =>
+    draft?.oka != null ? String(draft.oka) : "20"
+  );
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -141,8 +214,6 @@ export default function Home() {
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [backupText, setBackupText] = useState<string>("");
-  const [showAggregateModal, setShowAggregateModal] = useState(false);
-  const [aggregateStats, setAggregateStats] = useState<Record<string, AggregatePlayerStats> | null>(null);
   const [playerRegistry, setPlayerRegistry] = useState<PlayerRecord[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<Record<PlayerKey, string | null>>({
     A: null,
@@ -151,34 +222,49 @@ export default function Home() {
     D: null,
   });
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [editingMatchId, setEditingMatchId] = useState<string | null>(() =>
+    draft?.editingMatchId ?? null
+  );
 
   const [gameDate, setGameDate] = useState<string>(() => {
+    if (draft?.gameDate && typeof draft.gameDate === "string") return draft.gameDate;
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
 
   const [chipValueType, setChipValueType] = useState<
     "none" | "500" | "1000" | "custom"
-  >("none");
-  const [chipCustomValue, setChipCustomValue] = useState<string>("500");
+  >(() =>
+    isChipType(draft?.chipValueType) ? draft.chipValueType : "none"
+  );
+  const [chipCustomValue, setChipCustomValue] = useState<string>(() =>
+    draft?.chipCustomValue != null ? String(draft.chipCustomValue) : "500"
+  );
 
-  const [playerNames, setPlayerNames] = useState<Record<PlayerKey, string>>({
-    A: "A",
-    B: "B",
-    C: "C",
-    D: "D",
+  const [playerNames, setPlayerNames] = useState<Record<PlayerKey, string>>(() => {
+    const pn = draft?.playerNames;
+    if (!pn || typeof pn !== "object") return { A: "A", B: "B", C: "C", D: "D" };
+    return {
+      A: String(pn.A ?? "A"),
+      B: String(pn.B ?? "B"),
+      C: String(pn.C ?? "C"),
+      D: String(pn.D ?? "D"),
+    };
   });
 
   const [umaType, setUmaType] = useState<"10-20" | "10-30" | "5-10" | "custom">(
-    "10-30"
+    () => (isUmaType(draft?.umaType) ? draft.umaType : "10-30")
   );
-  const [customUma, setCustomUma] = useState<[string, string, string, string]>([
-    "30",
-    "10",
-    "-10",
-    "-30",
-  ]);
-  const [tobiBonus, setTobiBonus] = useState<string>("20");
+  const [customUma, setCustomUma] = useState<[string, string, string, string]>(
+    () => {
+      const cu = draft?.customUma;
+      if (!Array.isArray(cu) || cu.length !== 4) return ["30", "10", "-10", "-30"];
+      return cu.map((v) => String(v ?? "")) as [string, string, string, string];
+    }
+  );
+  const [tobiBonus, setTobiBonus] = useState<string>(() =>
+    draft?.tobiBonus != null ? String(draft.tobiBonus) : "10"
+  );
 
   const uma: [number, number, number, number] =
     umaType === "custom"
@@ -237,7 +323,7 @@ export default function Home() {
       setAuthChecked(true);
 
       try {
-        const saved = localStorage.getItem("mahjong_saved");
+        const saved = localStorage.getItem(DRAFT_KEY);
         if (saved) {
           const data = JSON.parse(saved);
           if (data) {
@@ -251,6 +337,7 @@ export default function Home() {
             if (data.chipCustomValue) setChipCustomValue(String(data.chipCustomValue));
             if (data.gameDate) setGameDate(data.gameDate);
             if (data.chipTotals) setChipTotals(data.chipTotals);
+            if (data.editingMatchId !== undefined) setEditingMatchId(data.editingMatchId);
           }
         }
       } catch (e) {
@@ -293,26 +380,69 @@ export default function Home() {
     }
     return options;
   }, [playerRegistry, userProfile]);
-  // -- Auto-save current state
+  // -- Ref to hold latest state for save-on-unmount
+  const latestStateRef = useRef({
+    rows,
+    playerNames,
+    umaType,
+    customUma,
+    tobiBonus,
+    oka,
+    chipValueType,
+    chipCustomValue,
+    gameDate,
+    chipTotals,
+    editingMatchId,
+  });
+  latestStateRef.current = {
+    rows,
+    playerNames,
+    umaType,
+    customUma,
+    tobiBonus,
+    oka,
+    chipValueType,
+    chipCustomValue,
+    gameDate,
+    chipTotals,
+    editingMatchId,
+  };
+
+  // -- Auto-save current state (on change and on unmount)
   useEffect(() => {
-    const payload = {
-      rows,
-      playerNames,
-      umaType,
-      customUma,
-      tobiBonus,
-      oka,
-      chipValueType,
-      chipCustomValue,
-      gameDate,
-      chipTotals,
-    };
+    const payload = latestStateRef.current;
     try {
-      localStorage.setItem("mahjong_saved", JSON.stringify(payload));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
     } catch (e) {
       console.error("autosave failed", e);
     }
-  }, [rows, playerNames, umaType, customUma, tobiBonus, oka, chipValueType, chipCustomValue, gameDate, chipTotals]);
+    return () => {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify(latestStateRef.current)
+        );
+      } catch (e) {
+        console.error("unmount save failed", e);
+      }
+    };
+  }, [rows, playerNames, umaType, customUma, tobiBonus, oka, chipValueType, chipCustomValue, gameDate, chipTotals, editingMatchId]);
+
+  // -- Save on page unload (refresh, close tab) for reliability
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify(latestStateRef.current)
+        );
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   const updatePoint = (rowIndex: number, player: PlayerKey, value: string) => {
     const parsed: number | "" = value === "" ? "" : parseInt(value, 10);
@@ -483,30 +613,27 @@ export default function Home() {
     };
 
     try {
-      const { error } = await supabase.from("matches").insert(record);
-      if (error) throw error;
+      if (editingMatchId) {
+        const { user_id: _uid, ...updateRecord } = record;
+        const { error } = await supabase
+          .from("matches")
+          .update(updateRecord)
+          .eq("id", editingMatchId);
+        if (error) throw error;
+        setEditingMatchId(null);
+      } else {
+        const { error } = await supabase.from("matches").insert(record);
+        if (error) throw error;
+      }
       if (currentUser) {
         await refreshHistory(currentUser.id);
       }
-      alert("保存しました。");
+      alert(editingMatchId ? "修正を保存しました。" : "保存しました。");
     } catch (e) {
       console.error("save failed", e);
       alert("保存に失敗しました。\n" + (e instanceof Error ? e.message : String(e)));
     }
   };
-
-  // Compute aggregated stats from Supabase history (rule-based filtering)
-  const computeAggregateStats = () => {
-    const map = buildAggregateStats(history);
-    setAggregateStats(map);
-    setShowAggregateModal(true);
-  };
-
-  // 履歴が更新された際、ダッシュボード表示中なら即座に再計算
-  useEffect(() => {
-    if (!showAggregateModal) return;
-    setAggregateStats(buildAggregateStats(history));
-  }, [history, showAggregateModal]);
 
   // Export history to text for backup display
   const exportHistoryBackup = () => {
@@ -541,7 +668,7 @@ export default function Home() {
     }
   };
 
-  const loadHistoryEntry = (id: string | number) => {
+  const loadHistoryEntry = (id: string | number, forEdit = false) => {
     const key = typeof id === "number" ? String(id) : id;
     const entry =
       history.find((h) => h.id === key) ??
@@ -608,17 +735,20 @@ export default function Home() {
         });
       }
     }
+    if (forEdit) setEditingMatchId(key);
+    else setEditingMatchId(null);
     setShowHistoryModal(false);
   };
 
   const newGame = () => {
     if (!confirm("現在の対局をリセットして新規作成しますか？ 保存していない変更は失われます。")) return;
+    setEditingMatchId(null);
     setRows([{ ...initialRow }]);
     setPlayerNames({ A: "A", B: "B", C: "C", D: "D" });
     setUmaType("10-30");
     setCustomUma(["30", "10", "-10", "-30"]);
-    setTobiBonus("20");
-    setOka("0");
+    setTobiBonus("10");
+    setOka("20");
     setChipValueType("none");
     setChipCustomValue("500");
     setChipTotals({ A: "", B: "", C: "", D: "" });
@@ -1025,21 +1155,15 @@ export default function Home() {
           </button>
           <button
             onClick={saveCurrentToHistory}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
+            className={`rounded border px-3 py-2 text-sm ${editingMatchId ? "border-amber-500 bg-amber-900/40 text-amber-100" : "border-zinc-600 bg-zinc-800 text-zinc-100"}`}
           >
-            保存
+            {editingMatchId ? "修正して保存" : "保存"}
           </button>
           <button
             onClick={() => setShowHistoryModal(true)}
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
           >
             履歴
-          </button>
-          <button
-            onClick={computeAggregateStats}
-            className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          >
-            通算成績
           </button>
           <button
             onClick={() => { if (confirm('新規作成しますか？ 現在のデータは保存されていない場合失われます')) newGame(); }}
@@ -1076,6 +1200,9 @@ export default function Home() {
                     </div>
                     <div className="flex gap-2">
               <button onClick={() => loadHistoryEntry(h.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs">読み込み</button>
+                      {!h.isShared && (
+                        <button onClick={() => loadHistoryEntry(h.id, true)} className="rounded bg-amber-600 px-2 py-1 text-xs">修正</button>
+                      )}
                       {!h.isShared && (
                         <button
                           onClick={async () => {
@@ -1185,49 +1312,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* 通算成績モーダル */ }
-        {showAggregateModal && aggregateStats && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-            <div className="w-full max-w-3xl rounded-lg bg-zinc-900 border border-zinc-700 p-4 text-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-base font-medium text-white">通算成績</div>
-                <button className="text-xs text-zinc-300" onClick={() => setShowAggregateModal(false)}>閉じる</button>
-              </div>
-              <div className="grid gap-4 max-h-80 overflow-y-auto">
-                {Object.values(aggregateStats).map((s: AggregatePlayerStats) => (
-                  <div key={s.name} className="rounded border border-zinc-700 bg-zinc-800/60 p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-white">{s.name}</div>
-                    <div className="text-xs text-zinc-400">対戦数: {s.games}</div>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-                      <div>合計スコア: <span className="font-medium tabular-nums">{Math.round(s.totalScore*10)/10}</span></div>
-                      <div>平均順位: <span className="font-medium">{s.games ? s.avgRank.toFixed(2) : '-'}</span></div>
-                      <div>通算トビ率: <span className="font-medium">{s.tobiRate.toFixed(1)}%</span></div>
-                      <div>平均チップ獲得数: <span className="font-medium">{s.avgChip != null ? s.avgChip.toFixed(1) : '-'}</span></div>
-                    </div>
-                    <div className="mt-2 text-xs text-zinc-400">順位分布</div>
-                    <div className="mt-1 space-y-1">
-                      {s.rankDist.map((count: number, idx: number) => {
-                        const pct = s.games ? (count / s.games) * 100 : 0;
-                        const colors = ['bg-amber-400','bg-blue-400','bg-amber-700','bg-zinc-600'];
-                        return (
-                          <div key={idx} className="flex items-center gap-2">
-                            <div className="w-8 text-xs text-zinc-300">{idx+1}位</div>
-                            <div className="h-3 flex-1 bg-zinc-700 rounded">
-                              <div className={`${colors[idx]} h-3 rounded`} style={{width: `${Math.min(Math.max(pct,0),100)}%`}}/>
-                            </div>
-                            <div className="w-14 text-right text-xs text-zinc-200">{count}回 ({pct.toFixed(1)}%)</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
         {/* バックアップモーダル */}
         {showBackupModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

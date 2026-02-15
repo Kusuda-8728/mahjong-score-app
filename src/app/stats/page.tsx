@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { Fragment, useEffect, useMemo, useState, useRef } from "react";
 import {
   HistoryEntry,
   PlayerKey,
@@ -23,6 +23,122 @@ interface HeadToHeadStats {
   losses: number;
   avgRankSelf: number | null;
   avgRankOpponent: number | null;
+}
+
+const CHART_RANKS = [1, 2, 3, 4] as const;
+const CHART_COLOR = "#f472b6"; /* rose-400 */
+
+function RankTransitionLineChart({
+  items,
+  selectedDetail,
+  onHoverDetail,
+}: {
+  items: RankHistoryItem[];
+  selectedDetail: RankHistoryItem | null;
+  onSelectDetail?: (item: RankHistoryItem | null) => void;
+  onHoverDetail: (item: RankHistoryItem | null) => void;
+}) {
+  const width = 640;
+  const height = 180;
+  const padding = { top: 16, right: 16, bottom: 24, left: 32 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  const n = items.length;
+  const xs =
+    n <= 1
+      ? items.map(() => padding.left + chartWidth / 2)
+      : items.map((_, i) => padding.left + (chartWidth * i) / (n - 1));
+  const rankToY = (rank: number) =>
+    padding.top + (chartHeight * (rank - 1)) / 3;
+  const ys = items.map((item) => rankToY(item.rank));
+
+  const pathD =
+    items.length < 2
+      ? ""
+      : items
+          .map((_, i) => `${i === 0 ? "M" : "L"} ${xs[i]} ${ys[i]}`)
+          .join(" ");
+
+  return (
+    <div className="w-full min-w-0">
+      <svg
+        width="100%"
+        height="auto"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="block"
+        style={{ aspectRatio: `${width} / ${height}` }}
+      >
+        {/* グリッド線 */}
+        {CHART_RANKS.map((r) => (
+          <line
+            key={r}
+            x1={padding.left}
+            y1={rankToY(r)}
+            x2={width - padding.right}
+            y2={rankToY(r)}
+            stroke="rgba(113,113,122,0.4)"
+            strokeWidth="1"
+            strokeDasharray="4 2"
+          />
+        ))}
+        {/* Y軸ラベル */}
+        {CHART_RANKS.map((r) => (
+          <text
+            key={r}
+            x={padding.left - 8}
+            y={rankToY(r)}
+            textAnchor="end"
+            dominantBaseline="middle"
+            className="fill-zinc-500 text-xs font-medium"
+          >
+            {r}
+          </text>
+        ))}
+        {/* 折れ線 */}
+        {pathD && (
+          <path
+            d={pathD}
+            fill="none"
+            stroke={CHART_COLOR}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {/* データポイント（当たりを広くするため透明の大きな円を下層に） */}
+        {items.map((item, i) => {
+          const isSelected = selectedDetail === item;
+          return (
+            <g key={i}>
+              <circle
+                cx={xs[i]}
+                cy={ys[i]}
+                r={20}
+                fill="transparent"
+                onMouseEnter={() => onHoverDetail(item)}
+                onClick={() => onHoverDetail(selectedDetail === item ? null : item)}
+                className="cursor-pointer"
+              />
+              <circle
+                cx={xs[i]}
+                cy={ys[i]}
+                r={isSelected ? 8 : 6}
+                fill={CHART_COLOR}
+                stroke={isSelected ? "#fda4af" : "rgba(0,0,0,0.2)"}
+                strokeWidth={isSelected ? 2 : 1}
+                className="pointer-events-none"
+              />
+              <title>
+                {i + 1}戦目: {item.rank}位
+              </title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }
 
 function SearchableSelect({
@@ -115,7 +231,7 @@ export default function StatsPage() {
   const [selectedSelf, setSelectedSelf] = useState<string>("");
   const [selectedOpponent, setSelectedOpponent] = useState<string>("");
   const [selectedChartPlayer, setSelectedChartPlayer] = useState<string>("");
-  const [chartRange, setChartRange] = useState<10 | 20 | 50>(10);
+  const [chartRange, setChartRange] = useState<5 | 10 | 20 | 50>(10);
   const [selectedDetail, setSelectedDetail] = useState<RankHistoryItem | null>(
     null
   );
@@ -128,6 +244,22 @@ export default function StatsPage() {
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+
+  /** 期間フィルタ: デフォルトは全期間 */
+  const [periodFilter, setPeriodFilter] = useState<"all" | "3m" | "6m" | "1y">("all");
+
+  const filteredHistory = useMemo(() => {
+    if (periodFilter === "all") return history;
+    const now = Date.now();
+    const ms =
+      periodFilter === "3m"
+        ? 3 * 31 * 24 * 60 * 60 * 1000
+        : periodFilter === "6m"
+          ? 6 * 31 * 24 * 60 * 60 * 1000
+          : 12 * 31 * 24 * 60 * 60 * 1000;
+    const since = now - ms;
+    return history.filter((e) => new Date(e.date).getTime() >= since);
+  }, [history, periodFilter]);
 
   useEffect(() => {
     const init = async () => {
@@ -180,8 +312,8 @@ export default function StatsPage() {
   }, []);
 
   const aggregateStats = useMemo(
-    () => buildAggregateStats(history),
-    [history]
+    () => buildAggregateStats(filteredHistory),
+    [filteredHistory]
   );
 
   const statsPlayerNames = useMemo(
@@ -198,10 +330,14 @@ export default function StatsPage() {
       statsPlayerNames.length > 0 &&
       !hasInitializedStatsFilter.current
     ) {
-      setStatsPlayerFilter(new Set(statsPlayerNames));
+      const initialFilter =
+        userDisplayName && statsPlayerNames.includes(userDisplayName)
+          ? new Set([userDisplayName])
+          : new Set(statsPlayerNames);
+      setStatsPlayerFilter(initialFilter);
       hasInitializedStatsFilter.current = true;
     }
-  }, [statsPlayerNames]);
+  }, [statsPlayerNames, userDisplayName]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -316,11 +452,11 @@ export default function StatsPage() {
       avgRankSelf: rankCount > 0 ? rankSumSelf / rankCount : null,
       avgRankOpponent: rankCount > 0 ? rankSumOpponent / rankCount : null,
     };
-  }, [history, selectedOpponent, selectedSelf]);
+  }, [filteredHistory, selectedOpponent, selectedSelf]);
 
   const rankHistoryWithContext = useMemo(
-    () => extractRankHistoryWithContext(history, selectedChartPlayer, 50),
-    [history, selectedChartPlayer]
+    () => extractRankHistoryWithContext(filteredHistory, selectedChartPlayer, 50),
+    [filteredHistory, selectedChartPlayer]
   );
 
   const displayedItems = useMemo(
@@ -363,6 +499,16 @@ export default function StatsPage() {
             <h1 className="text-lg font-semibold text-white">
               通算成績
             </h1>
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value as "all" | "3m" | "6m" | "1y")}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全期間</option>
+              <option value="3m">直近3ヶ月</option>
+              <option value="6m">直近6ヶ月</option>
+              <option value="1y">直近1年</option>
+            </select>
             {statsPlayerNames.length > 0 && (
               <div className="relative" ref={statsFilterRef}>
                 <button
@@ -438,7 +584,32 @@ export default function StatsPage() {
                 </p>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {displayedStats.map((stat) => (
+                  {displayedStats.map((stat) => {
+                    const rentaiRate = stat.games > 0
+                      ? ((stat.rankDist[0] + stat.rankDist[1]) / stat.games) * 100
+                      : 0;
+                    const leftItems: { label: string; value: string }[] = [
+                      { label: "通算スコア", value: stat.totalScore.toFixed(1) },
+                      { label: "平均順位", value: stat.avgRank.toFixed(2) },
+                      { label: "連対率", value: `${rentaiRate.toFixed(1)}%` },
+                      { label: "通算トビ率", value: `${stat.tobiRate.toFixed(1)}%` },
+                      { label: "平均チップ", value: stat.avgChip !== null ? `${stat.avgChip.toFixed(1)}枚` : "-" },
+                    ];
+                    const rightItems: { label: string; value: string }[] = [
+                      { label: "1位率", value: `${stat.rankPct[0].toFixed(1)}%` },
+                      { label: "2位率", value: `${stat.rankPct[1].toFixed(1)}%` },
+                      { label: "3位率", value: `${stat.rankPct[2].toFixed(1)}%` },
+                      { label: "4位率", value: `${stat.rankPct[3].toFixed(1)}%` },
+                    ];
+                    const maxRows = Math.max(leftItems.length, rightItems.length);
+                    const rows: { left?: { label: string; value: string }; right?: { label: string; value: string } }[] = [];
+                    for (let i = 0; i < maxRows; i++) {
+                      rows.push({
+                        left: leftItems[i],
+                        right: rightItems[i],
+                      });
+                    }
+                    return (
                       <div
                         key={stat.name}
                         className="rounded border border-zinc-700 bg-zinc-800/70 p-3 text-xs text-zinc-100"
@@ -447,26 +618,37 @@ export default function StatsPage() {
                           <span>{stat.name}</span>
                           <span>対戦数 {stat.games}</span>
                         </div>
-                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                          <span className="text-zinc-400">合計素点</span>
-                          <span>{stat.totalScore.toFixed(1)}</span>
-                          <span className="text-zinc-400">平均順位</span>
-                          <span>{stat.avgRank.toFixed(2)}</span>
-                          <span className="text-zinc-400">トップ率</span>
-                          <span>{stat.rankPct[0].toFixed(1)}%</span>
-                          <span className="text-zinc-400">ラス率</span>
-                          <span>{stat.rankPct[3].toFixed(1)}%</span>
-                          <span className="text-zinc-400">通算トビ率</span>
-                          <span>{stat.tobiRate.toFixed(1)}%</span>
-                          <span className="text-zinc-400">平均チップ</span>
-                          <span>
-                            {stat.avgChip !== null
-                              ? `${stat.avgChip.toFixed(1)}枚`
-                              : "-"}
-                          </span>
+                        <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-2">
+                          {rows.map((row, i) => (
+                            <Fragment key={i}>
+                              {row.left ? (
+                                <>
+                                  <span className="text-[10px] text-zinc-400">{row.left.label}</span>
+                                  <span className="text-zinc-100">{row.left.value}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span />
+                                  <span />
+                                </>
+                              )}
+                              {row.right ? (
+                                <>
+                                  <span className="text-[10px] text-zinc-400">{row.right.label}</span>
+                                  <span className="text-zinc-100">{row.right.value}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span />
+                                  <span />
+                                </>
+                              )}
+                            </Fragment>
+                          ))}
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -474,9 +656,21 @@ export default function StatsPage() {
         </section>
 
         <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
-          <h2 className="text-sm font-medium text-white mb-3">
-            順位履歴グラフ
-          </h2>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <h2 className="text-sm font-medium text-white">
+              順位履歴グラフ
+            </h2>
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value as "all" | "3m" | "6m" | "1y")}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全期間</option>
+              <option value="3m">直近3ヶ月</option>
+              <option value="6m">直近6ヶ月</option>
+              <option value="1y">直近1年</option>
+            </select>
+          </div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">プレイヤー</label>
@@ -488,75 +682,52 @@ export default function StatsPage() {
                 className="w-48"
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-zinc-400">表示期間</label>
-              <div className="flex gap-1">
-                {([10, 20, 50] as const).map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setChartRange(n)}
-                    className={`rounded px-3 py-2 text-sm ${
-                      chartRange === n
-                        ? "bg-zinc-500 text-white"
-                        : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
-                    }`}
-                  >
-                    直近{n}戦
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
           {selectedChartPlayer && displayedItems.length > 0 ? (
             <div
-              className="rounded border border-zinc-600 bg-zinc-800/50 p-3 overflow-x-auto flex flex-col md:flex-row gap-4"
+              className="rounded border border-zinc-600 bg-zinc-800/50 p-4 flex flex-col md:flex-row gap-4"
               onMouseLeave={() => setSelectedDetail(null)}
             >
-              <div className="min-w-0">
-                <div className="text-xs text-zinc-400 mb-2">
-                  縦軸: 順位（1位〜4位）　横軸: 左＝古い → 右＝直近（ホバーで詳細表示）
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-1 h-4 rounded bg-emerald-500 shrink-0" />
+                  <h3 className="text-sm font-medium text-white">順位推移</h3>
                 </div>
-                <div className="flex flex-col gap-0.5 min-w-max">
-                  {[1, 2, 3, 4].map((rank) => (
-                    <div key={rank} className="flex items-center gap-1">
-                      <span className="w-6 text-xs text-zinc-500 shrink-0">
-                        {rank}位
-                      </span>
-                      <div className="flex gap-0.5">
-                        {displayedItems.map((item, i) => {
-                          const isRankCell = item.rank === rank;
-                          const isDisplaying =
-                            selectedDetail === item && isRankCell;
-                          return (
-                            <div
-                              key={i}
-                              role="button"
-                              tabIndex={0}
-                              onMouseEnter={() =>
-                                isRankCell ? setSelectedDetail(item) : undefined
-                              }
-                              onFocus={() =>
-                                isRankCell ? setSelectedDetail(item) : undefined
-                              }
-                              className={`h-4 w-3 rounded-sm shrink-0 transition-colors ${
-                                isRankCell
-                                  ? isDisplaying
-                                    ? "bg-amber-300 ring-1 ring-amber-200"
-                                    : "bg-amber-500 hover:bg-amber-400 cursor-pointer"
-                                  : "bg-zinc-700/50"
-                              }`}
-                              title={
-                                isRankCell
-                                  ? `${i + 1}戦目: ${item.rank}位`
-                                  : undefined
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex gap-2 mb-3">
+                  {(() => {
+                    const options: (5 | 10 | 20 | 50)[] = [5, 10, 20, 50];
+                    const idx = options.indexOf(chartRange);
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setChartRange(options[Math.max(0, idx - 1)])}
+                          disabled={idx <= 0}
+                          className="rounded-full border border-zinc-600 bg-zinc-800 px-2 py-1 text-sm text-emerald-400/80 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          −
+                        </button>
+                        <span className="rounded-full border border-zinc-600 bg-zinc-800 px-3 py-1 text-sm text-emerald-400/90">
+                          直近{chartRange}戦
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setChartRange(options[Math.min(3, idx + 1)])}
+                          disabled={idx >= 3}
+                          className="rounded-full border border-zinc-600 bg-zinc-800 px-2 py-1 text-sm text-emerald-400/80 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          ＋
+                        </button>
+                      </>
+                    );
+                  })()}
                 </div>
+                <RankTransitionLineChart
+                  items={displayedItems}
+                  selectedDetail={selectedDetail}
+                  onSelectDetail={setSelectedDetail}
+                  onHoverDetail={setSelectedDetail}
+                />
               </div>
               {selectedDetail && (
                 <div className="flex-shrink-0 w-full md:w-64 rounded-lg border border-zinc-600 bg-zinc-900 p-3 text-xs">
@@ -605,14 +776,26 @@ export default function StatsPage() {
             </div>
           ) : (
             <p className="text-xs text-zinc-400">
-              プレイヤーを選択すると、順位履歴が棒グラフで表示されます。
+              プレイヤーを選択すると、順位推移が折れ線グラフで表示されます。
             </p>
           )}
 
         </section>
 
         <section className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-4">
-          <h2 className="text-sm font-medium text-white">対戦成績（1対1）</h2>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <h2 className="text-sm font-medium text-white">対戦成績（1対1）</h2>
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value as "all" | "3m" | "6m" | "1y")}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全期間</option>
+              <option value="3m">直近3ヶ月</option>
+              <option value="6m">直近6ヶ月</option>
+              <option value="1y">直近1年</option>
+            </select>
+          </div>
           <div className="mt-3 flex flex-col gap-3 md:flex-row">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-zinc-400">自分</label>
