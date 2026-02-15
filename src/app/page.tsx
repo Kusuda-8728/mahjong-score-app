@@ -320,7 +320,7 @@ export default function Home() {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        router.replace("/login");
+        router.replace("/lp");
         return;
       }
       setCurrentUser(session.user);
