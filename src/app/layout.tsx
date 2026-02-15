@@ -20,6 +20,17 @@ const BASE_URL =
     ? `https://${process.env.VERCEL_URL}`
     : "https://mahjong-score-app-mu.vercel.app");
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "みんなの麻雀スコア",
+  alternateName: "麻雀スコア管理・共有アプリ",
+  description:
+    "面倒な計算は不要。フレンドと対局履歴を共有。詳細な戦績分析で自分の強み・弱みが見える。スマホ最適化の麻雀スコア管理アプリ。",
+  url: BASE_URL,
+  inLanguage: "ja",
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
@@ -54,9 +65,17 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <meta
           name="google-site-verification"
           content="vUpt_WlSvdl8OKF8JO-XACVF8z2GqH2Z2oPs1Sv_Pc8"
+        />
+        <meta
+          name="msvalidate.01"
+          content="877F7C31A50931F037F0B097200581A4"
         />
         <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
         <meta httpEquiv="Pragma" content="no-cache" />
