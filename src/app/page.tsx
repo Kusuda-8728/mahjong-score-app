@@ -234,9 +234,10 @@ export default function Home() {
 
   const [chipValueType, setChipValueType] = useState<
     "none" | "500" | "1000" | "custom"
-  >(() =>
-    isChipType(draft?.chipValueType) ? draft.chipValueType : "none"
-  );
+  >(() => {
+    const cv = draft?.chipValueType;
+    return typeof cv === "string" && isChipType(cv) ? cv : "none";
+  });
   const [chipCustomValue, setChipCustomValue] = useState<string>(() =>
     draft?.chipCustomValue != null ? String(draft.chipCustomValue) : "500"
   );
@@ -253,7 +254,10 @@ export default function Home() {
   });
 
   const [umaType, setUmaType] = useState<"10-20" | "10-30" | "5-10" | "custom">(
-    () => (isUmaType(draft?.umaType) ? draft.umaType : "10-30")
+    () => {
+      const um = draft?.umaType;
+      return typeof um === "string" && isUmaType(um) ? um : "10-30";
+    }
   );
   const [customUma, setCustomUma] = useState<[string, string, string, string]>(
     () => {
