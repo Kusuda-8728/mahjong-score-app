@@ -32,6 +32,61 @@ interface RowData {
   ranks: Record<PlayerKey, number>;
   scores: Record<PlayerKey, number>;
   tobiPlayer: PlayerKey | "";
+  manualTieRanks?: Partial<Record<PlayerKey, number>>;
+}
+
+type TieRankMode = "shared_split" | "manual_order";
+
+function getTieRankCandidateMap(
+  points: Record<PlayerKey, number | "">
+): Partial<Record<PlayerKey, number[]>> {
+  const players: PlayerKey[] = ["A", "B", "C", "D"];
+  const filled = players
+    .map((p) => ({ key: p, points: points[p] }))
+    .filter((x): x is { key: PlayerKey; points: number } => typeof x.points === "number")
+    .sort((a, b) => b.points - a.points);
+  if (filled.length < 4) return {};
+
+  const map: Partial<Record<PlayerKey, number[]>> = {};
+  let i = 0;
+  while (i < filled.length) {
+    let j = i + 1;
+    while (j < filled.length && filled[j].points === filled[i].points) j++;
+    const size = j - i;
+    if (size >= 2) {
+      const ranks = Array.from({ length: size }, (_, idx) => i + idx + 1);
+      for (let k = i; k < j; k++) {
+        map[filled[k].key] = ranks;
+      }
+    }
+    i = j;
+  }
+  return map;
+}
+
+function normalizeManualTieRanks(
+  points: Record<PlayerKey, number | "">,
+  manualTieRanks?: Partial<Record<PlayerKey, number>>
+): Partial<Record<PlayerKey, number>> {
+  const candidateMap = getTieRankCandidateMap(points);
+  if (!manualTieRanks) return {};
+  const next: Partial<Record<PlayerKey, number>> = {};
+  const usedByGroup = new Map<string, Set<number>>();
+
+  (["A", "B", "C", "D"] as PlayerKey[]).forEach((p) => {
+    const candidates = candidateMap[p];
+    const raw = manualTieRanks[p];
+    if (!candidates || typeof raw !== "number") return;
+    if (!candidates.includes(raw)) return;
+    const key = candidates.join(",");
+    if (!usedByGroup.has(key)) usedByGroup.set(key, new Set<number>());
+    const used = usedByGroup.get(key)!;
+    if (used.has(raw)) return;
+    used.add(raw);
+    next[p] = raw;
+  });
+
+  return next;
 }
 
 function calculateRankAndScore(
@@ -39,7 +94,9 @@ function calculateRankAndScore(
   uma: [number, number, number, number],
   tobiBonus: number,
   tobiPlayer: PlayerKey | "",
-  okaPt: number
+  okaPt: number,
+  tieRankMode: TieRankMode,
+  manualTieRanks?: Partial<Record<PlayerKey, number>>
 ): {
   ranks: Record<PlayerKey, number>;
   scores: Record<PlayerKey, number>;
@@ -65,31 +122,88 @@ function calculateRankAndScore(
   const ranks: Record<PlayerKey, number> = { A: 0, B: 0, C: 0, D: 0 };
   const scores: Record<PlayerKey, number> = { A: 0, B: 0, C: 0, D: 0 };
 
-  sorted.forEach((item, index) => {
-    const rank = index + 1;
-    ranks[item.key] = rank;
-    const pts = item.points;
+  const hasTobi = sorted.some((x) => x.points < 0);
+  const tobashita = tobiPlayer as PlayerKey | "";
+  const resolvedManual = normalizeManualTieRanks(points, manualTieRanks);
+
+  const computeScore = (pts: number, umaVal: number, okaBonus: number): number => {
     let score =
-      Math.round(((pts - STARTING_POINTS) / 1000 + uma[rank - 1]) * 10) / 10;
+      Math.round(((pts - STARTING_POINTS) / 1000 + umaVal) * 10) / 10;
+    if (okaBonus) score += okaBonus;
+    return Math.round(score * 10) / 10;
+  };
 
-    // オカ（1位へのボーナス）を反映
-    if (rank === 1 && okaPt) {
-      score += okaPt;
-    }
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i + 1;
+    while (j < sorted.length && sorted[j].points === sorted[i].points) j++;
+    const group = sorted.slice(i, j);
+    const startRank = i + 1;
+    const endRank = j;
 
-    // トビ発生時: 4位が飛ばされた人、選択された人が飛ばした人
-    const hasTobi = sorted.some((x) => x.points < 0);
-    const tobashita = tobiPlayer as PlayerKey | "";
-    if (hasTobi && tobashita && tobiBonus > 0) {
-      if (item.key === tobashita) {
-        score += tobiBonus;
-      } else if (rank === 4) {
-        score -= tobiBonus;
+    if (group.length === 1) {
+      const player = group[0];
+      const rank = startRank;
+      ranks[player.key] = rank;
+      const okaBonus = rank === 1 ? okaPt : 0;
+      scores[player.key] = computeScore(player.points, uma[rank - 1], okaBonus);
+    } else if (tieRankMode === "shared_split") {
+      const umaSlice = uma.slice(startRank - 1, endRank);
+      const splitUma = umaSlice.reduce((a, b) => a + b, 0) / group.length;
+      const splitOka = startRank === 1 ? okaPt / group.length : 0;
+      group.forEach((player) => {
+        ranks[player.key] = startRank;
+        scores[player.key] = computeScore(player.points, splitUma, splitOka);
+      });
+    } else {
+      const candidates = Array.from(
+        { length: group.length },
+        (_, idx) => startRank + idx
+      );
+      const selected = group.map((p) => resolvedManual[p.key] ?? 0);
+      const valid =
+        selected.every((r) => candidates.includes(r)) &&
+        new Set(selected).size === group.length;
+      if (!valid) {
+        group.forEach((player) => {
+          ranks[player.key] = 0;
+          scores[player.key] = 0;
+        });
+      } else {
+        group.forEach((player, idx) => {
+          const rank = selected[idx];
+          ranks[player.key] = rank;
+          const okaBonus = rank === 1 ? okaPt : 0;
+          scores[player.key] = computeScore(player.points, uma[rank - 1], okaBonus);
+        });
       }
     }
+    i = j;
+  }
 
-    scores[item.key] = Math.round(score * 10) / 10;
-  });
+  if (hasTobi && tobashita && tobiBonus > 0) {
+    if (tieRankMode === "shared_split") {
+      const minPts = Math.min(...sorted.map((x) => x.points));
+      const bottomPlayers = sorted
+        .filter((x) => x.points === minPts && ranks[x.key] > 0)
+        .map((x) => x.key);
+      if (bottomPlayers.length > 0) {
+        const penalty = tobiBonus / bottomPlayers.length;
+        bottomPlayers.forEach((k) => {
+          scores[k] = Math.round((scores[k] - penalty) * 10) / 10;
+        });
+      }
+    } else {
+      sorted.forEach((x) => {
+        if (ranks[x.key] === 4) {
+          scores[x.key] = Math.round((scores[x.key] - tobiBonus) * 10) / 10;
+        }
+      });
+    }
+    if (ranks[tobashita] > 0) {
+      scores[tobashita] = Math.round((scores[tobashita] + tobiBonus) * 10) / 10;
+    }
+  }
 
   return { ranks, scores };
 }
@@ -111,6 +225,7 @@ const initialRow: RowData = {
   ranks: { A: 0, B: 0, C: 0, D: 0 },
   scores: { A: 0, B: 0, C: 0, D: 0 },
   tobiPlayer: "",
+  manualTieRanks: {},
 };
 
 const DRAFT_KEY = "mahjong_saved";
@@ -119,6 +234,7 @@ function loadDraft(): {
   rows?: RowData[];
   playerNames?: Record<PlayerKey, string>;
   umaType?: string;
+  tieRankMode?: TieRankMode;
   customUma?: string[];
   tobiBonus?: string | number;
   oka?: string | number;
@@ -180,6 +296,15 @@ export default function Home() {
         D: row.scores?.D ?? 0,
       },
       tobiPlayer: (row.tobiPlayer ?? "") as PlayerKey | "",
+      manualTieRanks: normalizeManualTieRanks(
+        {
+          A: row.points?.A ?? "",
+          B: row.points?.B ?? "",
+          C: row.points?.C ?? "",
+          D: row.points?.D ?? "",
+        },
+        row.manualTieRanks
+      ),
     }));
   });
 
@@ -214,6 +339,10 @@ export default function Home() {
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [backupText, setBackupText] = useState<string>("");
+  const [tieRankPicker, setTieRankPicker] = useState<{
+    rowIndex: number;
+    player: PlayerKey;
+  } | null>(null);
   const [playerRegistry, setPlayerRegistry] = useState<PlayerRecord[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<Record<PlayerKey, string | null>>({
     A: null,
@@ -259,6 +388,9 @@ export default function Home() {
       return typeof um === "string" && isUmaType(um) ? um : "10-30";
     }
   );
+  const [tieRankMode, setTieRankMode] = useState<TieRankMode>(() => {
+    return draft?.tieRankMode === "manual_order" ? "manual_order" : "shared_split";
+  });
   const [customUma, setCustomUma] = useState<[string, string, string, string]>(
     () => {
       const cu = draft?.customUma;
@@ -298,13 +430,15 @@ export default function Home() {
           uma,
           tobiBonusNum,
           row.tobiPlayer,
-          okaNum
+          okaNum,
+          tieRankMode,
+          row.manualTieRanks
         );
         return { ...row, ranks, scores };
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- derived from state
-  }, [umaType, customUma.join(","), tobiBonus, oka]);
+  }, [umaType, customUma.join(","), tobiBonus, oka, tieRankMode]);
 
   const refreshHistory = async (userId: string) => {
     try {
@@ -334,6 +468,9 @@ export default function Home() {
             if (data.rows) setRows(data.rows);
             if (data.playerNames) setPlayerNames(data.playerNames);
             if (data.umaType) setUmaType(data.umaType);
+            if (data.tieRankMode === "manual_order" || data.tieRankMode === "shared_split") {
+              setTieRankMode(data.tieRankMode);
+            }
             if (data.customUma) setCustomUma(data.customUma);
             if (data.tobiBonus) setTobiBonus(String(data.tobiBonus));
             if (data.oka) setOka(String(data.oka));
@@ -389,6 +526,7 @@ export default function Home() {
     rows,
     playerNames,
     umaType,
+    tieRankMode,
     customUma,
     tobiBonus,
     oka,
@@ -402,6 +540,7 @@ export default function Home() {
     rows,
     playerNames,
     umaType,
+    tieRankMode,
     customUma,
     tobiBonus,
     oka,
@@ -430,7 +569,7 @@ export default function Home() {
         console.error("unmount save failed", e);
       }
     };
-  }, [rows, playerNames, umaType, customUma, tobiBonus, oka, chipValueType, chipCustomValue, gameDate, chipTotals, editingMatchId]);
+  }, [rows, playerNames, umaType, tieRankMode, customUma, tobiBonus, oka, chipValueType, chipCustomValue, gameDate, chipTotals, editingMatchId]);
 
   // -- Save on page unload (refresh, close tab) for reliability
   useEffect(() => {
@@ -456,12 +595,15 @@ export default function Home() {
       const next = [...prev];
       const row = { ...next[rowIndex] };
       row.points = { ...row.points, [player]: parsed };
+      row.manualTieRanks = normalizeManualTieRanks(row.points, row.manualTieRanks);
       const { ranks, scores } = calculateRankAndScore(
         row.points,
         uma,
         tobiBonusNum,
         row.tobiPlayer,
-        okaNum
+        okaNum,
+        tieRankMode,
+        row.manualTieRanks
       );
       row.ranks = ranks;
       row.scores = scores;
@@ -480,7 +622,50 @@ export default function Home() {
         uma,
         tobiBonusNum,
         value,
-        okaNum
+        okaNum,
+        tieRankMode,
+        row.manualTieRanks
+      );
+      row.ranks = ranks;
+      row.scores = scores;
+      next[rowIndex] = row;
+      return next;
+    });
+  };
+
+  const updateManualTieRank = (
+    rowIndex: number,
+    player: PlayerKey,
+    rank: number
+  ) => {
+    setRows((prev) => {
+      const next = [...prev];
+      const row = { ...next[rowIndex] };
+      const pts = row.points[player];
+      if (typeof pts !== "number") return prev;
+
+      const groupPlayers = (["A", "B", "C", "D"] as PlayerKey[]).filter(
+        (k) => row.points[k] === pts
+      );
+      if (groupPlayers.length < 2) return prev;
+
+      const manual = { ...(row.manualTieRanks ?? {}) };
+      manual[player] = rank;
+      groupPlayers.forEach((k) => {
+        if (k !== player && manual[k] === rank) {
+          delete manual[k];
+        }
+      });
+      row.manualTieRanks = normalizeManualTieRanks(row.points, manual);
+
+      const { ranks, scores } = calculateRankAndScore(
+        row.points,
+        uma,
+        tobiBonusNum,
+        row.tobiPlayer,
+        okaNum,
+        tieRankMode,
+        row.manualTieRanks
       );
       row.ranks = ranks;
       row.scores = scores;
@@ -604,6 +789,7 @@ export default function Home() {
         rows,
         playerNames: normalizedNames,
         umaType,
+        tieRankMode,
         customUma,
         tobiBonus,
         oka,
@@ -702,12 +888,26 @@ export default function Home() {
             D: row.scores?.D ?? 0,
           },
           tobiPlayer: row.tobiPlayer ?? "",
+          manualTieRanks: normalizeManualTieRanks(
+            {
+              A: row.points?.A ?? "",
+              B: row.points?.B ?? "",
+              C: row.points?.C ?? "",
+              D: row.points?.D ?? "",
+            },
+            row.manualTieRanks
+          ),
         }));
         setRows(normalizedRows);
       }
       if (s.playerNames) setPlayerNames(s.playerNames);
       if (s.umaType && isUmaType(s.umaType)) {
         setUmaType(s.umaType);
+      }
+      if (s.tieRankMode === "manual_order" || s.tieRankMode === "shared_split") {
+        setTieRankMode(s.tieRankMode);
+      } else {
+        setTieRankMode("shared_split");
       }
       if (s.customUma && s.customUma.length === 4) {
         setCustomUma(
@@ -750,6 +950,7 @@ export default function Home() {
     setRows([{ ...initialRow }]);
     setPlayerNames({ A: "A", B: "B", C: "C", D: "D" });
     setUmaType("10-30");
+    setTieRankMode("shared_split");
     setCustomUma(["30", "10", "-10", "-30"]);
     setTobiBonus("10");
     setOka("20");
@@ -954,6 +1155,17 @@ export default function Home() {
               />
             </div>
             <div>
+              <label className="mb-1 block text-xs text-zinc-400">同点時の順位処理</label>
+              <select
+                value={tieRankMode}
+                onChange={(e) => setTieRankMode(e.target.value as TieRankMode)}
+                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="shared_split">同順扱い（ウマ・オカ割り）</option>
+                <option value="manual_order">順位指定（?タップで順位選択）</option>
+              </select>
+            </div>
+            <div>
               <label className="mb-1 block text-xs text-zinc-400">
                 チップ価値
               </label>
@@ -1069,6 +1281,8 @@ export default function Home() {
                 const check = checkTotal(row.points);
                 const checkIcon = check === "OK" ? "✅" : check === "NG" ? "❌" : "—";
                 const ptsArr = ["A", "B", "C", "D"].map((k) => row.points[k as PlayerKey]);
+                const tieCandidateMap = getTieRankCandidateMap(row.points);
+                const hasTie = Object.keys(tieCandidateMap).length > 0;
                 const hasTobi =
                   ptsArr.every((v) => typeof v === "number") &&
                   ptsArr.some((v: unknown) => typeof v === "number" && v < 0);
@@ -1109,12 +1323,29 @@ export default function Home() {
                     <tr>
                       {players.map((p, idx) => {
                         const shouldShowScore = check === "OK" && !tobiMissing;
+                        const showManualTiePick =
+                          shouldShowScore &&
+                          tieRankMode === "manual_order" &&
+                          hasTie &&
+                          rows[i].ranks[p] === 0 &&
+                          !!tieCandidateMap[p];
                         return (
                           <td key={p} className={`border border-zinc-600 px-1.5 py-[6px] font-medium tabular-nums ${idx < players.length - 1 ? "border-r-4 border-black" : ""}`}>
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
-                                {shouldShowScore ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
-                              </span>
+                              {showManualTiePick ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setTieRankPicker({ rowIndex: i, player: p })}
+                                  className="w-4 shrink-0 text-left text-xs font-semibold text-amber-300 underline underline-offset-2"
+                                  aria-label={`第${i + 1}局 ${p}の順位を選択`}
+                                >
+                                  ?
+                                </button>
+                              ) : (
+                                <span className={`w-4 shrink-0 text-left text-xs ${rows[i].ranks[p] === 1 ? "text-amber-300 font-semibold" : "text-zinc-100"}`}>
+                                  {shouldShowScore ? (rows[i].ranks[p] > 0 ? rows[i].ranks[p] : "-") : "-"}
+                                </span>
+                              )}
                               <span className="flex-1 text-center">
                                 {shouldShowScore ? (() => {
                                   const sc = rows[i].scores[p];
@@ -1176,6 +1407,48 @@ export default function Home() {
             新規作成
           </button>
         </div>
+
+        {tieRankPicker && (() => {
+          const row = rows[tieRankPicker.rowIndex];
+          if (!row) return null;
+          const candidateMap = getTieRankCandidateMap(row.points);
+          const candidates = candidateMap[tieRankPicker.player] ?? [];
+          if (candidates.length === 0) return null;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+              <div className="w-full max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm">
+                <div className="mb-2 text-sm font-medium text-white">同点時の順位指定</div>
+                <div className="mb-3 text-xs text-zinc-400">
+                  第{tieRankPicker.rowIndex + 1}局 / {tieRankPicker.player} の順位を選択
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {candidates.map((rank) => (
+                    <button
+                      key={rank}
+                      type="button"
+                      onClick={() => {
+                        updateManualTieRank(tieRankPicker.rowIndex, tieRankPicker.player, rank);
+                        setTieRankPicker(null);
+                      }}
+                      className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-700"
+                    >
+                      {rank}位
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setTieRankPicker(null)}
+                    className="text-xs text-zinc-300 hover:text-white"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 履歴モーダル */} 
         {showHistoryModal && (

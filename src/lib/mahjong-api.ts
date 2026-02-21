@@ -36,12 +36,14 @@ export interface SnapshotRowData {
   ranks?: Record<PlayerKey, number>;
   scores?: Record<PlayerKey, number>;
   tobiPlayer?: PlayerKey | "";
+  manualTieRanks?: Partial<Record<PlayerKey, number>>;
 }
 
 export interface SnapshotData {
   rows?: SnapshotRowData[];
   playerNames?: Record<PlayerKey, string>;
   umaType?: string;
+  tieRankMode?: "shared_split" | "manual_order";
   customUma?: [string, string, string, string];
   tobiBonus?: number | string;
   oka?: number | string;
