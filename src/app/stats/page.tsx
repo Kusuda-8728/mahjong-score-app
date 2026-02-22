@@ -25,6 +25,17 @@ interface HeadToHeadStats {
   avgRankOpponent: number | null;
 }
 
+type MatchModeFilter = "all" | "yonma" | "sanma";
+
+function resolveEntryMode(entry: HistoryEntry): "yonma" | "sanma" {
+  const mode = entry.snapshot?.gameMode;
+  if (mode === "yonma" || mode === "sanma") return mode;
+  const rows = entry.snapshot?.rows;
+  if (!rows || rows.length === 0) return "yonma";
+  const hasDPoint = rows.some((r) => typeof r.points?.D === "number");
+  return hasDPoint ? "yonma" : "sanma";
+}
+
 const CHART_RANKS = [1, 2, 3, 4] as const;
 const CHART_COLOR = "#f472b6"; /* rose-400 */
 
@@ -247,6 +258,7 @@ export default function StatsPage() {
 
   /** 期間フィルタ: デフォルトは全期間 */
   const [periodFilter, setPeriodFilter] = useState<"all" | "3m" | "6m" | "1y">("all");
+  const [matchModeFilter, setMatchModeFilter] = useState<MatchModeFilter>("all");
 
   const filteredHistory = useMemo(() => {
     if (periodFilter === "all") return history;
@@ -260,6 +272,11 @@ export default function StatsPage() {
     const since = now - ms;
     return history.filter((e) => new Date(e.date).getTime() >= since);
   }, [history, periodFilter]);
+
+  const filteredHistoryByMode = useMemo(() => {
+    if (matchModeFilter === "all") return filteredHistory;
+    return filteredHistory.filter((entry) => resolveEntryMode(entry) === matchModeFilter);
+  }, [filteredHistory, matchModeFilter]);
 
   useEffect(() => {
     const init = async () => {
@@ -312,8 +329,8 @@ export default function StatsPage() {
   }, []);
 
   const aggregateStats = useMemo(
-    () => buildAggregateStats(filteredHistory),
-    [filteredHistory]
+    () => buildAggregateStats(filteredHistoryByMode),
+    [filteredHistoryByMode]
   );
 
   const statsPlayerNames = useMemo(
@@ -398,7 +415,7 @@ export default function StatsPage() {
     let rankSumOpponent = 0;
     let rankCount = 0;
 
-    history.forEach((entry) => {
+    filteredHistoryByMode.forEach((entry) => {
       const snap = entry.snapshot;
       if (!snap.rows || !snap.playerNames) return;
 
@@ -452,11 +469,11 @@ export default function StatsPage() {
       avgRankSelf: rankCount > 0 ? rankSumSelf / rankCount : null,
       avgRankOpponent: rankCount > 0 ? rankSumOpponent / rankCount : null,
     };
-  }, [filteredHistory, selectedOpponent, selectedSelf]);
+  }, [filteredHistoryByMode, selectedOpponent, selectedSelf]);
 
   const rankHistoryWithContext = useMemo(
-    () => extractRankHistoryWithContext(filteredHistory, selectedChartPlayer, 50),
-    [filteredHistory, selectedChartPlayer]
+    () => extractRankHistoryWithContext(filteredHistoryByMode, selectedChartPlayer, 50),
+    [filteredHistoryByMode, selectedChartPlayer]
   );
 
   const displayedItems = useMemo(
@@ -508,6 +525,15 @@ export default function StatsPage() {
               <option value="3m">直近3ヶ月</option>
               <option value="6m">直近6ヶ月</option>
               <option value="1y">直近1年</option>
+            </select>
+            <select
+              value={matchModeFilter}
+              onChange={(e) => setMatchModeFilter(e.target.value as MatchModeFilter)}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全て</option>
+              <option value="yonma">四麻</option>
+              <option value="sanma">三麻</option>
             </select>
             {statsPlayerNames.length > 0 && (
               <div className="relative" ref={statsFilterRef}>
@@ -670,6 +696,15 @@ export default function StatsPage() {
               <option value="6m">直近6ヶ月</option>
               <option value="1y">直近1年</option>
             </select>
+            <select
+              value={matchModeFilter}
+              onChange={(e) => setMatchModeFilter(e.target.value as MatchModeFilter)}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全て</option>
+              <option value="yonma">四麻</option>
+              <option value="sanma">三麻</option>
+            </select>
           </div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <div className="flex flex-col gap-1">
@@ -794,6 +829,15 @@ export default function StatsPage() {
               <option value="3m">直近3ヶ月</option>
               <option value="6m">直近6ヶ月</option>
               <option value="1y">直近1年</option>
+            </select>
+            <select
+              value={matchModeFilter}
+              onChange={(e) => setMatchModeFilter(e.target.value as MatchModeFilter)}
+              className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+            >
+              <option value="all">全て</option>
+              <option value="yonma">四麻</option>
+              <option value="sanma">三麻</option>
             </select>
           </div>
           <div className="mt-3 flex flex-col gap-3 md:flex-row">
