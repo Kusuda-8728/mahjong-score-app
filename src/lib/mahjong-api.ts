@@ -42,9 +42,12 @@ export interface SnapshotRowData {
 export interface SnapshotData {
   rows?: SnapshotRowData[];
   playerNames?: Record<PlayerKey, string>;
+  gameMode?: "yonma" | "sanma";
+  startPoints?: number | string;
+  returnPoints?: number | string;
   umaType?: string;
   tieRankMode?: "shared_split" | "manual_order";
-  customUma?: [string, string, string, string];
+  customUma?: string[];
   tobiBonus?: number | string;
   oka?: number | string;
   chipValueType?: "none" | "500" | "1000" | "custom";
@@ -308,6 +311,17 @@ export function normalizeHistoryEntries(
   sharedIds?: Set<string>
 ): HistoryEntry[] {
   return matches.map((m) => {
+    const snap: SnapshotData = m.snapshot ?? {};
+    const hasValidDRankInRows =
+      snap.rows?.some((r) => typeof r.ranks?.D === "number" && r.ranks.D > 0) ??
+      false;
+    const hasNamedDPlayer = !!m.player_d && m.player_d !== "D";
+    const inferredMode: "yonma" | "sanma" =
+      snap.gameMode ??
+      (hasValidDRankInRows || hasNamedDPlayer ? "yonma" : "sanma");
+    const activeKeys: PlayerKey[] =
+      inferredMode === "sanma" ? ["A", "B", "C"] : ["A", "B", "C", "D"];
+
     const players: Record<PlayerKey, string> = {
       A: (m.player_a ?? "A") || "A",
       B: (m.player_b ?? "B") || "B",
@@ -320,16 +334,16 @@ export function normalizeHistoryEntries(
       C: m.score_c ?? 0,
       D: m.score_d ?? 0,
     };
-    let top: PlayerKey = "A";
-    PLAYER_KEYS.forEach((k) => {
+    let top: PlayerKey = activeKeys[0];
+    activeKeys.forEach((k) => {
       if (scores[k] > scores[top]) top = k;
     });
     const gd = m.game_date ?? "";
+    const participantNames = activeKeys.map((k) => players[k]).filter(Boolean);
     const name =
       gd.length >= 10
-        ? `${gd.slice(0, 4)}/${gd.slice(5, 7)}/${gd.slice(8, 10)} ${Object.values(players).join("、")}`
-        : `${Object.values(players).join("、")}`;
-    const snap: SnapshotData = m.snapshot ?? {};
+        ? `${gd.slice(0, 4)}/${gd.slice(5, 7)}/${gd.slice(8, 10)} ${participantNames.join("、")}`
+        : `${participantNames.join("、")}`;
     return {
       id: m.id,
       isShared: sharedIds?.has(m.id) ?? false,
@@ -340,7 +354,15 @@ export function normalizeHistoryEntries(
       snapshot: {
         rows: snap.rows,
         playerNames: snap.playerNames ?? players,
+        gameMode: inferredMode,
+        startPoints:
+          snap.startPoints ??
+          (inferredMode === "sanma" ? 35000 : 25000),
+        returnPoints:
+          snap.returnPoints ??
+          (inferredMode === "sanma" ? 40000 : 30000),
         umaType: snap.umaType ?? m.uma_type ?? undefined,
+        tieRankMode: snap.tieRankMode ?? "shared_split",
         customUma:
           snap.customUma ??
           [
@@ -375,6 +397,9 @@ export function buildAggregateStats(source: HistoryEntry[]): Record<string, Aggr
   source.forEach((entry) => {
     const snap = entry.snapshot;
     if (!snap.rows || !snap.playerNames) return;
+    const mode = snap.gameMode === "sanma" ? "sanma" : "yonma";
+    const activeKeys: PlayerKey[] =
+      mode === "sanma" ? ["A", "B", "C"] : ["A", "B", "C", "D"];
 
     const tobiBonusNum = Math.max(0, parseInt(String(snap.tobiBonus ?? 0), 10) || 0);
     const chipVal =
@@ -389,12 +414,12 @@ export function buildAggregateStats(source: HistoryEntry[]): Record<string, Aggr
     const hasChipRule = chipVal > 0;
 
     snap.rows.forEach((row) => {
-      const pts = PLAYER_KEYS.map((k) => row.points?.[k]);
+      const pts = activeKeys.map((k) => row.points?.[k]);
       if (pts.some((v) => typeof v !== "number")) return;
 
       const hasTobi = pts.some((v) => typeof v === "number" && v < 0);
 
-      PLAYER_KEYS.forEach((k) => {
+      activeKeys.forEach((k) => {
         const name = snap.playerNames?.[k] ?? k;
         const normalized = String(name).trim();
         if (!map[normalized]) {
@@ -418,7 +443,11 @@ export function buildAggregateStats(source: HistoryEntry[]): Record<string, Aggr
         const rankVal = row.ranks?.[k];
         const scoreVal = row.scores?.[k] ?? 0;
 
-        if (typeof rankVal === "number" && rankVal >= 1 && rankVal <= 4) {
+        if (
+          typeof rankVal === "number" &&
+          rankVal >= 1 &&
+          rankVal <= activeKeys.length
+        ) {
           entryStats.games += 1;
           entryStats.totalScore += scoreVal;
           entryStats.sumRank += rankVal;
@@ -426,14 +455,14 @@ export function buildAggregateStats(source: HistoryEntry[]): Record<string, Aggr
 
           if (hasTobiRule) {
             entryStats.gamesWithTobiRule += 1;
-            if (hasTobi && rankVal === 4) entryStats.tobiCount += 1;
+            if (hasTobi && rankVal === activeKeys.length) entryStats.tobiCount += 1;
           }
         }
       });
     });
 
     if (hasChipRule && snap.chipTotals) {
-      PLAYER_KEYS.forEach((k) => {
+      activeKeys.forEach((k) => {
         const name = snap.playerNames?.[k] ?? k;
         const normalized = String(name).trim();
         if (!map[normalized]) return;

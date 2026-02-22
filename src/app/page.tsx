@@ -22,9 +22,6 @@ import {
   isChipType,
   isUmaType,
   normalizeHistoryEntries,
-  PLAYER_KEYS,
-  STARTING_POINTS,
-  VALID_TOTALS,
 } from "@/lib/mahjong-api";
 
 interface RowData {
@@ -36,16 +33,17 @@ interface RowData {
 }
 
 type TieRankMode = "shared_split" | "manual_order";
+type GameMode = "yonma" | "sanma";
 
 function getTieRankCandidateMap(
-  points: Record<PlayerKey, number | "">
+  points: Record<PlayerKey, number | "">,
+  activePlayers: PlayerKey[]
 ): Partial<Record<PlayerKey, number[]>> {
-  const players: PlayerKey[] = ["A", "B", "C", "D"];
-  const filled = players
+  const filled = activePlayers
     .map((p) => ({ key: p, points: points[p] }))
     .filter((x): x is { key: PlayerKey; points: number } => typeof x.points === "number")
     .sort((a, b) => b.points - a.points);
-  if (filled.length < 4) return {};
+  if (filled.length < activePlayers.length) return {};
 
   const map: Partial<Record<PlayerKey, number[]>> = {};
   let i = 0;
@@ -66,14 +64,15 @@ function getTieRankCandidateMap(
 
 function normalizeManualTieRanks(
   points: Record<PlayerKey, number | "">,
-  manualTieRanks?: Partial<Record<PlayerKey, number>>
+  manualTieRanks: Partial<Record<PlayerKey, number>> | undefined,
+  activePlayers: PlayerKey[]
 ): Partial<Record<PlayerKey, number>> {
-  const candidateMap = getTieRankCandidateMap(points);
+  const candidateMap = getTieRankCandidateMap(points, activePlayers);
   if (!manualTieRanks) return {};
   const next: Partial<Record<PlayerKey, number>> = {};
   const usedByGroup = new Map<string, Set<number>>();
 
-  (["A", "B", "C", "D"] as PlayerKey[]).forEach((p) => {
+  activePlayers.forEach((p) => {
     const candidates = candidateMap[p];
     const raw = manualTieRanks[p];
     if (!candidates || typeof raw !== "number") return;
@@ -91,24 +90,25 @@ function normalizeManualTieRanks(
 
 function calculateRankAndScore(
   points: Record<PlayerKey, number | "">,
-  uma: [number, number, number, number],
+  uma: number[],
   tobiBonus: number,
   tobiPlayer: PlayerKey | "",
   okaPt: number,
   tieRankMode: TieRankMode,
-  manualTieRanks?: Partial<Record<PlayerKey, number>>
+  manualTieRanks: Partial<Record<PlayerKey, number>> | undefined,
+  activePlayers: PlayerKey[],
+  returnPoints: number
 ): {
   ranks: Record<PlayerKey, number>;
   scores: Record<PlayerKey, number>;
 } {
-  const players: PlayerKey[] = ["A", "B", "C", "D"];
-  const filledPoints = players.map((p) => ({
+  const filledPoints = activePlayers.map((p) => ({
     key: p,
     points: typeof points[p] === "number" ? (points[p] as number) : null,
   }));
 
   const filledCount = filledPoints.filter((x) => x.points !== null).length;
-  if (filledCount < 4) {
+  if (filledCount < activePlayers.length) {
     return {
       ranks: { A: 0, B: 0, C: 0, D: 0 },
       scores: { A: 0, B: 0, C: 0, D: 0 },
@@ -124,11 +124,12 @@ function calculateRankAndScore(
 
   const hasTobi = sorted.some((x) => x.points < 0);
   const tobashita = tobiPlayer as PlayerKey | "";
-  const resolvedManual = normalizeManualTieRanks(points, manualTieRanks);
+  const lastRank = activePlayers.length;
+  const resolvedManual = normalizeManualTieRanks(points, manualTieRanks, activePlayers);
 
   const computeScore = (pts: number, umaVal: number, okaBonus: number): number => {
     let score =
-      Math.round(((pts - STARTING_POINTS) / 1000 + umaVal) * 10) / 10;
+      Math.round(((pts - returnPoints) / 1000 + umaVal) * 10) / 10;
     if (okaBonus) score += okaBonus;
     return Math.round(score * 10) / 10;
   };
@@ -195,7 +196,7 @@ function calculateRankAndScore(
       }
     } else {
       sorted.forEach((x) => {
-        if (ranks[x.key] === 4) {
+        if (ranks[x.key] === lastRank) {
           scores[x.key] = Math.round((scores[x.key] - tobiBonus) * 10) / 10;
         }
       });
@@ -209,15 +210,19 @@ function calculateRankAndScore(
 }
 
 function checkTotal(
-  points: Record<PlayerKey, number | "" | "-">
+  points: Record<PlayerKey, number | "" | "-">,
+  activePlayers: PlayerKey[],
+  expectedTotal: number,
+  mode: GameMode
 ): "OK" | "NG" | null {
-  const players: PlayerKey[] = ["A", "B", "C", "D"];
-  const vals = players.map((p) => points[p]);
+  const vals = activePlayers.map((p) => points[p]);
   if (vals.some((v) => typeof v !== "number")) return null;
   const total = (vals as number[]).reduce((a, b) => a + b, 0);
-  return VALID_TOTALS.includes(total as (typeof VALID_TOTALS)[number])
-    ? "OK"
-    : "NG";
+  if (mode === "sanma") {
+    return total === expectedTotal ? "OK" : "NG";
+  }
+  // 四麻は既存挙動を維持（100000/120000 を許可）
+  return total === 100000 || total === 120000 ? "OK" : "NG";
 }
 
 const initialRow: RowData = {
@@ -233,6 +238,9 @@ const DRAFT_KEY = "mahjong_saved";
 function loadDraft(): {
   rows?: RowData[];
   playerNames?: Record<PlayerKey, string>;
+  gameMode?: GameMode;
+  startPoints?: string | number;
+  returnPoints?: string | number;
   umaType?: string;
   tieRankMode?: TieRankMode;
   customUma?: string[];
@@ -272,6 +280,19 @@ export default function Home() {
 
   const [initialDraft] = useState(() => loadDraft());
   const draft = initialDraft;
+  const [gameMode, setGameMode] = useState<GameMode>(() =>
+    draft?.gameMode === "sanma" ? "sanma" : "yonma"
+  );
+  const activePlayers: PlayerKey[] =
+    gameMode === "sanma" ? ["A", "B", "C"] : ["A", "B", "C", "D"];
+  const [startPoints, setStartPoints] = useState<string>(() => {
+    if (draft?.startPoints != null) return String(draft.startPoints);
+    return gameMode === "sanma" ? "35000" : "25000";
+  });
+  const [returnPoints, setReturnPoints] = useState<string>(() => {
+    if (draft?.returnPoints != null) return String(draft.returnPoints);
+    return gameMode === "sanma" ? "40000" : "30000";
+  });
 
   const [rows, setRows] = useState<RowData[]>(() => {
     const r = draft?.rows;
@@ -303,7 +324,8 @@ export default function Home() {
           C: row.points?.C ?? "",
           D: row.points?.D ?? "",
         },
-        row.manualTieRanks
+        row.manualTieRanks,
+        activePlayers
       ),
     }));
   });
@@ -328,9 +350,6 @@ export default function Home() {
       D: norm(ct.D ?? ""),
     };
   });
-  const [oka, setOka] = useState<string>(() =>
-    draft?.oka != null ? String(draft.oka) : "20"
-  );
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -382,7 +401,7 @@ export default function Home() {
     };
   });
 
-  const [umaType, setUmaType] = useState<"10-20" | "10-30" | "5-10" | "custom">(
+  const [umaType, setUmaType] = useState<UmaTypeOption>(
     () => {
       const um = draft?.umaType;
       return typeof um === "string" && isUmaType(um) ? um : "10-30";
@@ -402,16 +421,34 @@ export default function Home() {
     draft?.tobiBonus != null ? String(draft.tobiBonus) : "10"
   );
 
-  const uma: [number, number, number, number] =
-    umaType === "custom"
-      ? customUma.map((v, i) => {
-          const n = parseFloat(v);
-          return isNaN(n) ? (UMA_PRESETS["10-30"] as [number, number, number, number])[i] : n;
-        }) as [number, number, number, number]
-      : UMA_PRESETS[umaType] ?? UMA_PRESETS["10-30"];
+  const uma: number[] = useMemo(() => {
+    if (gameMode === "yonma") {
+      if (umaType !== "custom") return UMA_PRESETS[umaType] ?? UMA_PRESETS["10-30"];
+      return customUma.map((v, i) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n)
+          ? n
+          : (UMA_PRESETS["10-30"] as [number, number, number, number])[i];
+      });
+    }
+    // 三麻
+    if (umaType === "10-20") return [20, 10, -30];
+    if (umaType === "10-30") return [30, 10, -40];
+    if (umaType === "5-10") return [10, 5, -15];
+    const sanmaCustom = [customUma[0], customUma[1], customUma[2]].map((v, i) => {
+      const n = parseFloat(v);
+      const fallback = [20, 10, -30][i];
+      return Number.isFinite(n) ? n : fallback;
+    });
+    return sanmaCustom;
+  }, [gameMode, umaType, customUma]);
 
+  const startPointsNum = Math.max(0, parseInt(startPoints, 10) || 0);
+  const returnPointsNum = Math.max(0, parseInt(returnPoints, 10) || 0);
   const tobiBonusNum = Math.max(0, parseInt(tobiBonus, 10) || 0);
-  const okaNum = parseFloat(oka) || 0;
+  // オカは「返し点 - 持ち点」を人数分集計し、1000点単位に換算して扱う
+  const okaNum =
+    ((returnPointsNum - startPointsNum) * activePlayers.length) / 1000;
 
   const chipValuePerPoint =
     chipValueType === "none"
@@ -425,6 +462,11 @@ export default function Home() {
   useEffect(() => {
     setRows((prev) =>
       prev.map((row) => {
+        const normalizedManual = normalizeManualTieRanks(
+          row.points,
+          row.manualTieRanks,
+          activePlayers
+        );
         const { ranks, scores } = calculateRankAndScore(
           row.points,
           uma,
@@ -432,13 +474,15 @@ export default function Home() {
           row.tobiPlayer,
           okaNum,
           tieRankMode,
-          row.manualTieRanks
+          normalizedManual,
+          activePlayers,
+          returnPointsNum
         );
-        return { ...row, ranks, scores };
+        return { ...row, manualTieRanks: normalizedManual, ranks, scores };
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- derived from state
-  }, [umaType, customUma.join(","), tobiBonus, oka, tieRankMode]);
+  }, [gameMode, umaType, customUma.join(","), tobiBonus, tieRankMode, returnPoints, startPoints]);
 
   const refreshHistory = async (userId: string) => {
     try {
@@ -467,13 +511,17 @@ export default function Home() {
           if (data) {
             if (data.rows) setRows(data.rows);
             if (data.playerNames) setPlayerNames(data.playerNames);
+            if (data.gameMode === "sanma" || data.gameMode === "yonma") {
+              setGameMode(data.gameMode);
+            }
+            if (data.startPoints !== undefined) setStartPoints(String(data.startPoints));
+            if (data.returnPoints !== undefined) setReturnPoints(String(data.returnPoints));
             if (data.umaType) setUmaType(data.umaType);
             if (data.tieRankMode === "manual_order" || data.tieRankMode === "shared_split") {
               setTieRankMode(data.tieRankMode);
             }
             if (data.customUma) setCustomUma(data.customUma);
             if (data.tobiBonus) setTobiBonus(String(data.tobiBonus));
-            if (data.oka) setOka(String(data.oka));
             if (data.chipValueType) setChipValueType(data.chipValueType);
             if (data.chipCustomValue) setChipCustomValue(String(data.chipCustomValue));
             if (data.gameDate) setGameDate(data.gameDate);
@@ -525,11 +573,13 @@ export default function Home() {
   const latestStateRef = useRef({
     rows,
     playerNames,
+    gameMode,
+    startPoints,
+    returnPoints,
     umaType,
     tieRankMode,
     customUma,
     tobiBonus,
-    oka,
     chipValueType,
     chipCustomValue,
     gameDate,
@@ -539,11 +589,13 @@ export default function Home() {
   latestStateRef.current = {
     rows,
     playerNames,
+    gameMode,
+    startPoints,
+    returnPoints,
     umaType,
     tieRankMode,
     customUma,
     tobiBonus,
-    oka,
     chipValueType,
     chipCustomValue,
     gameDate,
@@ -569,7 +621,7 @@ export default function Home() {
         console.error("unmount save failed", e);
       }
     };
-  }, [rows, playerNames, umaType, tieRankMode, customUma, tobiBonus, oka, chipValueType, chipCustomValue, gameDate, chipTotals, editingMatchId]);
+  }, [rows, playerNames, gameMode, startPoints, returnPoints, umaType, tieRankMode, customUma, tobiBonus, chipValueType, chipCustomValue, gameDate, chipTotals, editingMatchId]);
 
   // -- Save on page unload (refresh, close tab) for reliability
   useEffect(() => {
@@ -595,7 +647,7 @@ export default function Home() {
       const next = [...prev];
       const row = { ...next[rowIndex] };
       row.points = { ...row.points, [player]: parsed };
-      row.manualTieRanks = normalizeManualTieRanks(row.points, row.manualTieRanks);
+      row.manualTieRanks = normalizeManualTieRanks(row.points, row.manualTieRanks, activePlayers);
       const { ranks, scores } = calculateRankAndScore(
         row.points,
         uma,
@@ -603,7 +655,9 @@ export default function Home() {
         row.tobiPlayer,
         okaNum,
         tieRankMode,
-        row.manualTieRanks
+        row.manualTieRanks,
+        activePlayers,
+        returnPointsNum
       );
       row.ranks = ranks;
       row.scores = scores;
@@ -624,7 +678,9 @@ export default function Home() {
         value,
         okaNum,
         tieRankMode,
-        row.manualTieRanks
+        row.manualTieRanks,
+        activePlayers,
+        returnPointsNum
       );
       row.ranks = ranks;
       row.scores = scores;
@@ -644,7 +700,7 @@ export default function Home() {
       const pts = row.points[player];
       if (typeof pts !== "number") return prev;
 
-      const groupPlayers = (["A", "B", "C", "D"] as PlayerKey[]).filter(
+      const groupPlayers = activePlayers.filter(
         (k) => row.points[k] === pts
       );
       if (groupPlayers.length < 2) return prev;
@@ -656,7 +712,7 @@ export default function Home() {
           delete manual[k];
         }
       });
-      row.manualTieRanks = normalizeManualTieRanks(row.points, manual);
+      row.manualTieRanks = normalizeManualTieRanks(row.points, manual, activePlayers);
 
       const { ranks, scores } = calculateRankAndScore(
         row.points,
@@ -665,7 +721,9 @@ export default function Home() {
         row.tobiPlayer,
         okaNum,
         tieRankMode,
-        row.manualTieRanks
+        row.manualTieRanks,
+        activePlayers,
+        returnPointsNum
       );
       row.ranks = ranks;
       row.scores = scores;
@@ -703,7 +761,7 @@ export default function Home() {
   // Save current session to Supabase matches table
   const saveCurrentToHistory = async () => {
     const completed = rows.filter((r) =>
-      ["A", "B", "C", "D"].every((k) => typeof r.points[k as PlayerKey] === "number")
+      activePlayers.every((k) => typeof r.points[k] === "number")
     );
     const lastRow = completed[completed.length - 1];
     if (!lastRow) {
@@ -719,8 +777,14 @@ export default function Home() {
       typeof v === "number" ? v : null;
 
     const row = lastRow;
-    const pts = row.points as Record<PlayerKey, number>;
+    const pts: Record<PlayerKey, number> = {
+      A: typeof row.points.A === "number" ? row.points.A : 0,
+      B: typeof row.points.B === "number" ? row.points.B : 0,
+      C: typeof row.points.C === "number" ? row.points.C : 0,
+      D: typeof row.points.D === "number" ? row.points.D : 0,
+    };
     const ranks = row.ranks;
+    const lastRank = activePlayers.length;
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -757,18 +821,18 @@ export default function Home() {
       player_b: normalizedNames.B,
       player_c: normalizedNames.C,
       player_d: normalizedNames.D,
-      score_a: pts.A ?? 0,
-      score_b: pts.B ?? 0,
-      score_c: pts.C ?? 0,
-      score_d: pts.D ?? 0,
+      score_a: pts.A,
+      score_b: pts.B,
+      score_c: pts.C,
+      score_d: pts.D,
       rank_a: ranks.A || null,
       rank_b: ranks.B || null,
       rank_c: ranks.C || null,
       rank_d: ranks.D || null,
-      tobi_a: ranks.A === 4 && (pts.A ?? 0) < 0,
-      tobi_b: ranks.B === 4 && (pts.B ?? 0) < 0,
-      tobi_c: ranks.C === 4 && (pts.C ?? 0) < 0,
-      tobi_d: ranks.D === 4 && (pts.D ?? 0) < 0,
+      tobi_a: ranks.A === lastRank && pts.A < 0,
+      tobi_b: ranks.B === lastRank && pts.B < 0,
+      tobi_c: ranks.C === lastRank && pts.C < 0,
+      tobi_d: ranks.D === lastRank && pts.D < 0,
       chip_a: parseChip(chipTotals.A),
       chip_b: parseChip(chipTotals.B),
       chip_c: parseChip(chipTotals.C),
@@ -776,10 +840,13 @@ export default function Home() {
       uma_type: umaType,
       custom_uma:
         umaType === "custom"
-          ? customUma.map((s) => parseInt(s, 10) || 0)
+          ? (gameMode === "sanma"
+              ? customUma.slice(0, 3)
+              : customUma
+            ).map((s) => parseInt(s, 10) || 0)
           : null,
       tobi_bonus: parseInt(String(tobiBonus), 10) || 0,
-      oka: parseInt(String(oka), 10) || 0,
+      oka: okaNum,
       chip_value_type: chipValueType,
       chip_custom_value:
         chipValueType === "custom"
@@ -788,11 +855,14 @@ export default function Home() {
       snapshot: {
         rows,
         playerNames: normalizedNames,
+        gameMode,
+        startPoints,
+        returnPoints,
         umaType,
         tieRankMode,
         customUma,
         tobiBonus,
-        oka,
+        oka: okaNum,
         chipValueType,
         chipCustomValue,
         gameDate,
@@ -867,6 +937,13 @@ export default function Home() {
     if (!entry) return;
     const s = entry.snapshot;
     if (s) {
+      const modeFromSnapshot: GameMode =
+        s.gameMode === "sanma" ? "sanma" : "yonma";
+      const playersForSnapshot: PlayerKey[] =
+        modeFromSnapshot === "sanma" ? ["A", "B", "C"] : ["A", "B", "C", "D"];
+      setGameMode(modeFromSnapshot);
+      if (s.startPoints !== undefined) setStartPoints(String(s.startPoints));
+      if (s.returnPoints !== undefined) setReturnPoints(String(s.returnPoints));
       if (s.rows) {
         const normalizedRows: RowData[] = s.rows.map((row) => ({
           points: {
@@ -895,7 +972,8 @@ export default function Home() {
               C: row.points?.C ?? "",
               D: row.points?.D ?? "",
             },
-            row.manualTieRanks
+            row.manualTieRanks,
+            playersForSnapshot
           ),
         }));
         setRows(normalizedRows);
@@ -909,13 +987,17 @@ export default function Home() {
       } else {
         setTieRankMode("shared_split");
       }
-      if (s.customUma && s.customUma.length === 4) {
+      if (s.customUma && s.customUma.length >= 3) {
         setCustomUma(
-          s.customUma.map((v) => String(v ?? "")) as [string, string, string, string]
+          [
+            String(s.customUma[0] ?? "30"),
+            String(s.customUma[1] ?? "10"),
+            String(s.customUma[2] ?? "-10"),
+            String(s.customUma[3] ?? "-30"),
+          ]
         );
       }
       if (s.tobiBonus !== undefined) setTobiBonus(String(s.tobiBonus));
-      if (s.oka !== undefined) setOka(String(s.oka));
       if (s.chipValueType && isChipType(s.chipValueType)) {
         setChipValueType(s.chipValueType);
       }
@@ -949,17 +1031,18 @@ export default function Home() {
     setEditingMatchId(null);
     setRows([{ ...initialRow }]);
     setPlayerNames({ A: "A", B: "B", C: "C", D: "D" });
-    setUmaType("10-30");
+    setUmaType(gameMode === "sanma" ? "10-20" : "10-30");
     setTieRankMode("shared_split");
     setCustomUma(["30", "10", "-10", "-30"]);
+    setStartPoints(gameMode === "sanma" ? "35000" : "25000");
+    setReturnPoints(gameMode === "sanma" ? "40000" : "30000");
     setTobiBonus("10");
-    setOka("20");
     setChipValueType("none");
     setChipCustomValue("500");
     setChipTotals({ A: "", B: "", C: "", D: "" });
   };
 
-  const players = PLAYER_KEYS;
+  const players = activePlayers;
   useEffect(() => {
     setSelectedPlayers((prev) => {
       const next: Record<PlayerKey, string | null> = { A: null, B: null, C: null, D: null };
@@ -995,14 +1078,12 @@ export default function Home() {
   );
 
   const completedRows = rows.filter(
-    (r) =>
-      [r.points.A, r.points.B, r.points.C, r.points.D].every(
-        (v) => typeof v === "number"
-      )
+    (r) => players.every((p) => typeof r.points[p] === "number")
   );
 
   const playerStats = players.map((p) => {
     const games = completedRows.length;
+    const lastRank = players.length;
     if (games === 0) {
       return {
         player: p,
@@ -1024,10 +1105,11 @@ export default function Home() {
       if (r >= 1 && r <= 4) rankDist[r - 1]++;
     });
     const tobiCount = completedRows.filter((r) => {
-      const hasTobi = [r.points.A, r.points.B, r.points.C, r.points.D].some(
-        (v) => typeof v === "number" && v < 0
-      );
-      return hasTobi && r.ranks[p] === 4;
+      const hasTobi = players.some((p) => {
+        const v = r.points[p];
+        return typeof v === "number" && v < 0;
+      });
+      return hasTobi && r.ranks[p] === lastRank;
     }).length;
     return {
       player: p,
@@ -1085,7 +1167,12 @@ export default function Home() {
             />
             <span className="text-xs text-zinc-500">
               {gameDate
-                ? `${gameDate.slice(0, 4)}/${gameDate.slice(5, 7)}/${gameDate.slice(8, 10)}`
+                ? (() => {
+                    const d = new Date(`${gameDate}T00:00:00`);
+                    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+                    const wd = Number.isNaN(d.getTime()) ? "" : `(${weekdays[d.getDay()]})`;
+                    return `${gameDate.slice(0, 4)}/${gameDate.slice(5, 7)}/${gameDate.slice(8, 10)} ${wd}`.trim();
+                  })()
                 : ""}
             </span>
           </div>
@@ -1097,6 +1184,49 @@ export default function Home() {
             ルール設定
           </h2>
           <div className="flex flex-wrap gap-6">
+            <div>
+              <label className="mb-1 block text-xs text-zinc-400">対局モード</label>
+              <select
+                value={gameMode}
+                onChange={(e) => {
+                  const nextMode = e.target.value as GameMode;
+                  setGameMode(nextMode);
+                  if (nextMode === "sanma") {
+                    setUmaType("10-20");
+                    setStartPoints("35000");
+                    setReturnPoints("40000");
+                  } else {
+                    setUmaType("10-30");
+                    setStartPoints("25000");
+                    setReturnPoints("30000");
+                  }
+                }}
+                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              >
+                <option value="yonma">四麻</option>
+                <option value="sanma">三麻</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-zinc-400">持ち点</label>
+              <input
+                type="number"
+                min={0}
+                value={startPoints}
+                onChange={(e) => setStartPoints(e.target.value)}
+                className="w-24 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-zinc-400">返し点</label>
+              <input
+                type="number"
+                min={0}
+                value={returnPoints}
+                onChange={(e) => setReturnPoints(e.target.value)}
+                className="w-24 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
             <div>
               <label className="mb-1 block text-xs text-zinc-400">ウマ</label>
               <select
@@ -1113,7 +1243,7 @@ export default function Home() {
               </select>
               {umaType === "custom" && (
                 <div className="mt-2 flex gap-1">
-                  {([0, 1, 2, 3] as const).map((i) => (
+                  {(gameMode === "sanma" ? [0, 1, 2] : [0, 1, 2, 3]).map((i) => (
                     <input
                       key={i}
                       type="text"
@@ -1142,16 +1272,6 @@ export default function Home() {
                 value={tobiBonus}
                 onChange={(e) => setTobiBonus(e.target.value)}
                 className="w-20 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">オカ（pt）</label>
-              <input
-                type="number"
-                step="0.1"
-                value={oka}
-                onChange={(e) => setOka(e.target.value)}
-                className="w-24 rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-500"
               />
             </div>
             <div>
@@ -1278,10 +1398,12 @@ export default function Home() {
             </thead>
             <tbody>
               {rows.map((row, i) => {
-                const check = checkTotal(row.points);
+                const expectedTotal =
+                  gameMode === "sanma" ? startPointsNum * 3 : startPointsNum * 4;
+                const check = checkTotal(row.points, activePlayers, expectedTotal, gameMode);
                 const checkIcon = check === "OK" ? "✅" : check === "NG" ? "❌" : "—";
-                const ptsArr = ["A", "B", "C", "D"].map((k) => row.points[k as PlayerKey]);
-                const tieCandidateMap = getTieRankCandidateMap(row.points);
+                const ptsArr = activePlayers.map((k) => row.points[k]);
+                const tieCandidateMap = getTieRankCandidateMap(row.points, activePlayers);
                 const hasTie = Object.keys(tieCandidateMap).length > 0;
                 const hasTobi =
                   ptsArr.every((v) => typeof v === "number") &&
@@ -1411,7 +1533,7 @@ export default function Home() {
         {tieRankPicker && (() => {
           const row = rows[tieRankPicker.rowIndex];
           if (!row) return null;
-          const candidateMap = getTieRankCandidateMap(row.points);
+          const candidateMap = getTieRankCandidateMap(row.points, activePlayers);
           const candidates = candidateMap[tieRankPicker.player] ?? [];
           if (candidates.length === 0) return null;
           return (
@@ -1460,11 +1582,39 @@ export default function Home() {
               </div>
               <div className="space-y-2 max-h-80 overflow-y-auto">
                 {history.length === 0 && <div className="text-zinc-500">履歴がありません</div>}
-        {history.map((h) => (
-          <div key={h.id} className="flex items-center justify-between border border-zinc-700 rounded px-3 py-2">
+        {history.map((h) => {
+          const mode = h.snapshot?.gameMode === "sanma" ? "sanma" : "yonma";
+          const playerKeys: PlayerKey[] =
+            mode === "sanma" ? ["A", "B", "C"] : ["A", "B", "C", "D"];
+          const participants = playerKeys
+            .map((k) => h.players[k])
+            .filter(Boolean)
+            .join("、");
+          const gameDateText = h.snapshot?.gameDate
+            ? `${h.snapshot.gameDate.slice(0, 4)}/${h.snapshot.gameDate.slice(5, 7)}/${h.snapshot.gameDate.slice(8, 10)}`
+            : new Date(h.date).toLocaleDateString();
+
+          return (
+          <div
+            key={h.id}
+            className={`flex items-center justify-between rounded px-3 py-2 border ${
+              mode === "sanma"
+                ? "border-emerald-700/60 bg-emerald-950/10"
+                : "border-sky-700/60 bg-sky-950/10"
+            }`}
+          >
                     <div>
                       <div className="flex items-center gap-1.5 text-sm text-zinc-200">
-                        {h.name}
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                            mode === "sanma"
+                              ? "bg-emerald-600/20 text-emerald-300"
+                              : "bg-sky-600/20 text-sky-300"
+                          }`}
+                        >
+                          {mode === "sanma" ? "三麻" : "四麻"}
+                        </span>
+                        <span>{`${gameDateText} ${participants}`}</span>
                         {h.isShared && (
                           <span className="rounded bg-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300">
                             共有
@@ -1472,7 +1622,7 @@ export default function Home() {
                         )}
                       </div>
                       <div className="text-xs text-zinc-500">
-                        対局日: {h.snapshot?.gameDate ? `${h.snapshot.gameDate.slice(0,4)}/${h.snapshot.gameDate.slice(5,7)}/${h.snapshot.gameDate.slice(8,10)}` : new Date(h.date).toLocaleDateString()} / 参加: {Object.values(h.players).join(', ')} / トップ: {h.players?.[h.topPlayer] ?? h.topPlayer}
+                        対局日: {gameDateText} / 参加: {playerKeys.map((k) => h.players[k]).filter(Boolean).join(", ")} / トップ: {h.players?.[h.topPlayer] ?? h.topPlayer}
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -1515,7 +1665,8 @@ export default function Home() {
                       )}
                     </div>
                   </div>
-                ))}
+          );
+        })}
               </div>
             </div>
           </div>
