@@ -34,7 +34,7 @@ const jsonLd = {
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: "みんなの麻雀スコア | 麻雀スコア管理・共有アプリ",
+    default: "みんなの麻雀スコア",
     template: "%s | みんなの麻雀スコア",
   },
   description:
@@ -54,6 +54,10 @@ export const metadata: Metadata = {
       "簡単入力・フレンド共有・スマホ最適化。麻雀をもっと楽しく、もっと深く。",
     type: "website",
     locale: "ja_JP",
+  },
+  icons: {
+    icon: "/favicon.png",
+    apple: "/favicon.png",
   },
 };
 
